@@ -320,13 +320,43 @@ describe('remote controller', () => {
     assert.equal(socks.all.length, 2);
   });
 
-  test('close codes 4001/4004/4009 are final', () => {
-    for (const [code, status] of [[4001, 'kicked'], [4004, 'not-found'], [4009, 'full']]) {
-      const { rc, socks } = setup();
+  test('server close codes are final', () => {
+    const cases = [[4000, 'replaced'], [4001, 'kicked'], [4002, 'closed'], [4004, 'not-found'], [4009, 'full']];
+    for (const [code, status] of cases) {
+      const { rc, socks, timers } = setup();
       socks.last().open();
       socks.last().drop(code);
-      assert.equal(rc.status(), status);
+      assert.equal(rc.status(), status, `close ${code}`);
+      timers.advance(60_000);
+      assert.equal(socks.all.length, 1, `no reconnect after ${code}`);
     }
+  });
+
+  test('4002 before the socket ever opened → not-found', () => {
+    const { rc, socks, timers } = setup();
+    socks.last().drop(4002);
+    assert.equal(rc.status(), 'not-found');
+    timers.advance(60_000);
+    assert.equal(socks.all.length, 1);
+  });
+
+  test("'Table full' then 4001 stays full", () => {
+    const { rc, socks } = setup();
+    const ws = socks.last();
+    ws.open();
+    ws.msg({ t: 'error', msg: 'Table full' });
+    ws.drop(4001);
+    assert.equal(rc.status(), 'full');
+  });
+
+  test('leave then 4001 stays closed', () => {
+    const { rc, socks, statuses } = setup();
+    const ws = socks.last();
+    ws.open();
+    rc.leave();
+    ws.drop(4001);
+    assert.equal(rc.status(), 'closed');
+    assert.ok(!statuses.includes('kicked'));
   });
 
   test('invalid code goes straight to not-found', () => {
