@@ -220,6 +220,12 @@ Delivered MULTIPLAYER_SPEC §3 (controller seam), §5/§7 (home, join bubble, sh
 - Joining a missing code makes Chrome log two console errors that the page can't suppress (`WebSocket … 404` and `Failed to load resource … 404`). Allow-list them in the not-found check.
 - `qa/e2e.mjs` solo/tutorial runs still pass unchanged (checked with QA_ONLY: desktop-3opp, mobile-2opp, both tutorial runs, tips-first-game ×2, tips-off, skip-05: 9/9). They also pass when served by `wrangler dev`.
 - Checked on `wrangler dev :8790` with Playwright: host + join by list and by typed lowercase code + join by link, bad code message, bot add, timer change seen read-only by a guest, start, seat rotation, rings, ⏱ log tags with an idle player, Leave with confirm (the seat greys out as "X left" + toast), refresh mid-game rejoins the same seat, full game → lobby result → Rematch. No horizontal scroll at 390px or 1280px.
+- **QA fixes (2026-10-16), findings 1/3/4/5:**
+  - #1: while the socket isn't `open`, the lobby shows "📡 Reconnecting…" and disables every host button (Leave and Share stay live). A lobby frame that still fails to send flashes "Not connected — try again in a sec".
+  - #3: the ⏱ log tag only goes on incremental log updates, so a refresh or rejoin no longer puts it on "Round N begins".
+  - #4: the remote table uses fast banners, so a newer beat replaces queued ones.
+  - #5: in multiplayer, routine moves (place, pass, rose flips, discard, pick) no longer toast because the log and seats already show them. ⏱ moves, a lost card, "X left" and errors still toast. Toasts show one at a time in the top bar, left of the icon buttons. On mobile they briefly cover the status line, not the opponents or the log header.
+  - Checked on `wrangler dev :8790` (desktop host, mobile guest, bot, 20s timer, idle until ⏱): ≤1 banner on screen, no toast over the seats or the log header, ⏱ tags on the right lines and none after a reload, and the lobby disabled with the 📡 note once the server was stopped.
 
 ### Server: shell request handled (2026-10-16)
 - **`lobby.me`** (+ `meWaiting`) is now sent per recipient: your seat in the lobby, your player id in a game, `null` while waiting for the rematch. Tested. The `avatar.k` tag is no longer needed for `findMe`; the server still passes it through untouched (avatars stay opaque). The lobby used to be broadcast to every socket, including sockets that never sent hello. Now it only goes to members.

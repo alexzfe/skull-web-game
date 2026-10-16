@@ -397,16 +397,21 @@ const home = createHome({
   onHome() { clearRoomHash(); toSetup(); },
 });
 
+// A lobby frame sent while the socket is down never arrives: say so.
+function lobbySend(type, data) {
+  if (mp && !mp.rc.lobby(type, data)) lobbyUI.flash('Not connected — try again in a sec', 'bad');
+}
+
 const lobbyUI = createLobbyUI({
   onOption(patch) {
     if (!mp) return;
     saveHostOptions(patch);
-    mp.rc.lobby('options', patch);
+    lobbySend('options', patch);
   },
-  onAddBot: () => mp?.rc.lobby('addBot'),
-  onRemoveBot: seat => mp?.rc.lobby('removeBot', { seat }),
-  onKick: seat => mp?.rc.lobby('kick', { seat }),
-  onStart: () => mp?.rc.lobby(mp.lobby?.lastWinner ? 'rematch' : 'start'),
+  onAddBot: () => lobbySend('addBot'),
+  onRemoveBot: seat => lobbySend('removeBot', { seat }),
+  onKick: seat => lobbySend('kick', { seat }),
+  onStart: () => lobbySend(mp?.lobby?.lastWinner ? 'rematch' : 'start'),
   onLeave: leaveRoom,
   onShare: shareRoom,
 });
@@ -617,7 +622,7 @@ function enterTable() {
   controller = session.controller;
   leaveDirector();
   ui.reset();
-  ui.setFastBanners(false);
+  ui.setFastBanners(true);   // views arrive at the server's pace: only the latest beat matters
   ui.setMode({ mp: true, sound: soundOn() });
   ui.showGame();
   document.getElementById('net-pill').hidden = true;
@@ -670,7 +675,7 @@ function onView(view, meta) {
   const fresh = prev && a && a.n !== prev.lastAction?.n;
   if (view.phase === 'place-initial') mp.ghost = null;
   if (fresh) {
-    announce(ui, prev, view, a);
+    announce(quietUI(a), prev, view, a);
     if (a.type === 'reveal' && prev.phase === 'reveal' && view.phase !== 'reveal') {
       holdFinalFlip(prev, view, a);
       scheduleNudge();
@@ -709,6 +714,14 @@ function renderTable(shownView = mp.view, locked = !!mp.holdTimer) {
     clocks: seatClocks(mp.meta?.deadline, { timer: mp.lobby?.options?.timer ?? 0 }),
     now: mp.rc.now(),
   });
+}
+
+// Routine moves are already in the log and on the seats; in multiplayer they'd
+// stack up as toasts over the table. ⏱ moves and a lost card still toast.
+const ROUTINE = new Set(['placeInitial', 'place', 'pass', 'reveal', 'discard', 'chooseFirst']);
+function quietUI(a) {
+  if (a.auto || !ROUTINE.has(a.type)) return ui;
+  return { ...ui, toast: (text, kind) => { if (a.type === 'reveal' && kind !== 'good') ui.toast(text, kind); } };
 }
 
 function noteSeatChanges(before, after, view) {
