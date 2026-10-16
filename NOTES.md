@@ -261,6 +261,34 @@ What it covers (MULTIPLAYER_SPEC §11), with 4 browser contexts:
 5. **Toasts cover content (low, owner: shell).** On desktop, toasts stack at the top right, over the Road log header and its first lines (`mp-timer-ring-host-desktop.png`, `mp-forfeit-host-desktop.png`). On mobile, they sit over the top opponents' names (`mp-game-game-over-ann-mobile.png`: "Hosty passes / Rose 1/2" hide "Panthers"; `mp-rematch-bob-mobile.png`). In multiplayer, every ⏱ / other-player action adds one, so it's busier than solo.
 6. **Info: seat-status changes wait out the final-flip hold.** When a view arrives while the 2s final-flip hold is on screen (e.g. Bob leaves just as a challenge resolves), the "left" / out state shows only when the hold ends (≤2s). This is by design; the QA check allows 4s.
 
+### Final regression (2026-10-16, master 69e03ed)
+
+**Results:**
+- `node --test test/`: **155/155**.
+- Solo/tutorial `npm run e2e`: **ALL 97 RUNS PASSED** (82/82 skip-at-every-step). No `qa/` changes were needed for tap-anywhere-to-continue, because the flows still click Next, which works the same.
+- `npm run mp-e2e`, final script: **3/3 PASS** (default, `--swap`, default) with **no findings**: no card leaks, no console errors, no horizontal scroll and no stray ⏱ moves.
+
+**New automated checks** for the re-verified findings:
+- offline lobby: `context.setOffline` + forced socket close → "📡 Reconnecting…" with Start disabled → back online re-enables it;
+- no ⏱ tag on a "Round N begins" line, and the ⏱ tag on the idle player's own line on every client;
+- an in-page banner timeline (longest time on screen, how many at once);
+- no visible toast over a seat name or the Road log header.
+
+**Earlier findings, re-checked:**
+1. **#1 lobby actions dropped while reconnecting: FIXED.** Offline, the lobby shows "📡 Reconnecting…" and Start is disabled; it re-enables once the socket is back (`mp-lobby-offline-host-*.png`).
+2. #2 wrangler dev reloads: fixed on the server side by `npm run dev` (worker/dev.mjs mirror). `mp-e2e` still runs wrangler from its own temp snapshot, so it doesn't depend on that.
+3. **#3 ⏱ tag on the wrong line after a refresh: FIXED.** Ann's refresh never left a tag on "Round N begins", and the host's ⏱ move is tagged on "⏱ Hosty passes/places" on all three clients (`mp-forfeit-host-desktop.png`, log line 13).
+4. **#4 banner lag: FIXED.** Every banner on every client lasted ≤1.21s (13–54 banners per client per run). At most 2 nodes were in the layer at once, which is the old one fading out as the new one arrives. The screenshots show the current beat, e.g. "You must flip 4" while Ann is flipping (`mp-auto-move-ann-mobile.png`).
+5. **#5 toasts covering content: FIXED.** There were no toast overlaps with seat names or the log header in 3 runs. On desktop the toast sits in the top bar, left of the icon buttons (`mp-forfeit-host-desktop.png`: "Bob left the table").
+
+**New findings (low, owner: shell):**
+- **Mobile toasts hide the turn cue.** On mobile the single top-bar toast sits over the status line, which is the shell's documented trade-off. In `mp-auto-move-ann-mobile.png`, "⏱ Hosty passes" covers "ROUND 1 · YOUR MOVE" for ~2.4s right when it becomes Ann's turn. The seat glow and prompt still show it's her move, so this is minor. Option: skip the toast (or shorten it) when the status line just switched to "Your move".
+- **Offline lobby: some disabled buttons don't look disabled.** While reconnecting, every lobby button is `disabled`, but only Start and the seats stepper grey out. The ✕ kick/remove-bot buttons, the timer segments and Open/Private look live, and taps do nothing (`mp-lobby-offline-host-mobile.png`). Add a `:disabled` style (opacity ~.45, `cursor: default`) for `.ls-x` and `.lseg button`.
+
+**Harness fixes this round:**
+- Screenshots are capped at 8s. The after-refresh screenshot isn't awaited: Playwright waits for web fonts, and right after a reload that took ~30s here, long enough for the refreshed player's 20s clock to run out. That caused the stray ⏱ moves on Ann. curl reaches Google Fonts in 0.1s, so this is the browser's font loading in this sandbox, not the app.
+- If Bob's Leave falls in the game's last round, there's no round-over to forfeit at, so that run reports the forfeit check as not reached instead of failing.
+
 ### QA-side notes
 - `page.reload({ waitUntil: 'load' })` sometimes waited ~20s for Google Fonts in the sandbox. Meanwhile the refreshed player's clock ran out and they made a ⏱ pass, which looked like an app timeout. The script now waits for `domcontentloaded` and then for the table. It also logs every ⏱ move and dumps the player's recent trail if one is unexpected.
 - The solo suite expects port 5173. During this run, :5173 was already served by another session's `python3` server, which serves the same files. I didn't touch it.

@@ -122,6 +122,7 @@ function trackSocket(p) {
       try { m = JSON.parse(f.payload); } catch { return; }
       if (m.t === 'view') {
         p.ws.views++;
+        if (m.view.phase === 'round-over' && p.ws.view?.phase !== 'round-over') (p.ws.roundOvers ??= []).push(Date.now());
         p.ws.view = m.view; p.ws.seq = m.seq; p.ws.meta = m;
         for (const l of viewLeaks(m.view)) p.ws.leaks.push(`seq ${m.seq}: ${l}`);
         const a = m.view.lastAction;
@@ -160,6 +161,7 @@ function watchPage(p) {
   p.allow404 = false;
   const push = e => {
     if (p.allow404 && ALLOWED_404.some(r => r.test(e))) { coverage.add('allowed-404'); return; }
+    if (p.offline && /ERR_INTERNET_DISCONNECTED|WebSocket connection/i.test(e)) return;
     p.errors.push(e);
   };
   p.page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') push(`console.${m.type()}: ${m.text()}`); });
@@ -167,6 +169,7 @@ function watchPage(p) {
   p.page.on('requestfailed', r => {
     const why = r.failure()?.errorText || '';
     if (/ERR_ABORTED/.test(why) && p.navigating) return;   // in-flight requests cut by our own reload
+    if (p.offline) return;                                 // the offline-lobby step
     push(`requestfailed: ${r.url()} ${why}`);
   });
 }
@@ -180,6 +183,22 @@ async function makePlayer(browser, key, name, vp) {
       if (!localStorage.getItem('skull.settings')) localStorage.setItem('skull.settings', JSON.stringify({ name: n, opponents: 3 }));
     } catch { /* ignore */ }
   }, name);
+  // Banner timeline (text, shown, gone), for the "banners lag behind" check.
+  await context.addInitScript(() => {
+    window.__banners = [];
+    addEventListener('DOMContentLoaded', () => {
+      const layer = document.getElementById('banner-layer');
+      if (!layer) return;
+      const live = new Map();
+      new MutationObserver(recs => {
+        for (const r of recs) {
+          for (const n of r.addedNodes) if (n.nodeType === 1) { const b = { text: n.textContent.replace(/\s+/g, ' ').trim(), shown: performance.now(), gone: null }; live.set(n, b); window.__banners.push(b); }
+          for (const n of r.removedNodes) { const b = live.get(n); if (b) { b.gone = performance.now(); live.delete(n); } }
+        }
+        window.__bannerMax = Math.max(window.__bannerMax || 0, layer.children.length);
+      }).observe(layer, { childList: true });
+    });
+  });
   // Record every socket close (code/reason) in the page, for diagnosing reconnects.
   await context.addInitScript(() => {
     window.__wsCloses = [];
@@ -187,6 +206,7 @@ async function makePlayer(browser, key, name, vp) {
     window.WebSocket = class extends W {
       constructor(...a) {
         super(...a);
+        (window.__sockets ??= []).push(this);
         const t0 = performance.now();
         this.addEventListener('close', e => window.__wsCloses.push({ code: e.code, reason: e.reason, clean: e.wasClean, lived: Math.round(performance.now() - t0) }));
       }
@@ -200,7 +220,9 @@ async function makePlayer(browser, key, name, vp) {
   return p;
 }
 
-const shot = (p, label) => p.page.screenshot({ path: join(SHOTS, `mp-${label}-${p.key}-${p.size}.png`) }).catch(() => {});
+// Playwright screenshots wait for web fonts; right after a reload that can take
+// ~30s here (Google Fonts), so cap them: a stalled shot must not stall a player.
+const shot = (p, label) => p.page.screenshot({ path: join(SHOTS, `mp-${label}-${p.key}-${p.size}.png`), timeout: 8000 }).catch(() => {});
 
 // Snapshot of what this player can see/do, plus DOM-level hiding checks.
 async function probe(p) {
@@ -227,6 +249,19 @@ async function probe(p) {
       document.querySelectorAll('#game [data-face]').forEach(n => { if (!n.closest('#hand')) leaks.push(`[data-face=${n.dataset.face}] outside my hand`); });
       document.querySelectorAll('#opponents .hand-mini').forEach(h => { if (h.querySelector('svg, [data-face]')) leaks.push('opponent hand-mini shows a face'); });
     }
+    // ⏱ tags must sit on the auto move's own line, never on "Round N begins".
+    const badAutoTags = [...document.querySelectorAll('#log-list li')].filter(li => li.querySelector('.auto-tag') && /Round \d+ begins/.test(li.textContent)).length;
+    // Toasts must not cover seat names or the Road log header.
+    const toastOverlaps = [];
+    if (screen === 'game') {
+      const hit = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+      const covers = [...document.querySelectorAll('#game .seat-name, #log-details > summary')].filter(vis);
+      for (const t of document.querySelectorAll('#toasts .toast')) {
+        if (!vis(t) || +getComputedStyle(t).opacity < 0.5) continue;
+        const r = t.getBoundingClientRect();
+        for (const c of covers) if (hit(r, c.getBoundingClientRect())) toastOverlaps.push(`toast "${t.textContent}" covers "${c.textContent.trim()}"`);
+      }
+    }
     const controls = screen === 'game'
       ? [...document.querySelectorAll('#game [data-action-index]:not([disabled])')].filter(vis).length : 0;
     const meSeat = q('#me-seat .seat');
@@ -247,7 +282,7 @@ async function probe(p) {
       startLabel: q('#lobby [data-lobby="start"]')?.textContent?.trim() || '',
       lobbyText: q('#lobby-body')?.textContent?.replace(/\s+/g, ' ').trim() || '',
       gameoverOpen: !!q('#gameover')?.open,
-      leaks,
+      leaks, badAutoTags, toastOverlaps,
       overflowX: document.documentElement.scrollWidth - window.innerWidth,
     };
   }).catch(() => null);
@@ -264,6 +299,14 @@ function checkProbe(p, s) {
     (p.leakSeen ??= new Set()).add(l);
     fail(`${p.key}: DOM shows a hidden card: ${l}`);
     shot(p, 'LEAK');
+  }
+  if (s.badAutoTags && !p.badTagSeen) { p.badTagSeen = true; fail(`${p.key}: ⏱ tag on a "Round N begins" log line`); shot(p, 'BAD-AUTO-TAG'); }
+  for (const o of s.toastOverlaps) {
+    const k = o.replace(/".*?" covers/, 'covers');
+    if ((p.toastSeen ??= new Set()).has(k)) continue;
+    p.toastSeen.add(k);
+    note(`${p.key} (${p.size}): ${o}`);
+    shot(p, `TOAST-OVER-${p.toastSeen.size}`);
   }
   if (s.screen === 'game' && s.phase && !p.phasesShot.has(s.phase)) {
     p.phasesShot.add(s.phase);
@@ -479,7 +522,29 @@ async function setupLobby({ host, ann, bob, scout }) {
   const ro = await ann.page.textContent('#lobby .lobby-ro').catch(() => '');
   if (!ro.includes(String(TIMER_S))) fail(`guest lobby does not show the ${TIMER_S}s timer ("${ro}")`);
   for (const p of [host, ann, bob]) { checkProbe(p, await probe(p)); await shot(p, 'lobby'); }
+  await offlineLobby(host);
   return { code, link };
+}
+
+// Off the socket, the host's lobby must say so and not offer buttons that would do nothing.
+async function offlineLobby(p) {
+  p.offline = true;
+  await p.context.setOffline(true);
+  await p.page.evaluate(() => { for (const w of window.__sockets || []) try { w.close(); } catch { /* ignore */ } });
+  const shown = await p.page.waitForFunction(() => {
+    const start = document.querySelector('#lobby [data-lobby="start"]');
+    return /Reconnecting/i.test(document.querySelector('#lobby-body')?.textContent || '') && start && start.disabled;
+  }, null, { timeout: 5000 }).then(() => true).catch(() => false);
+  await shot(p, 'lobby-offline');
+  if (!shown) fail(`${p.key}: lobby offline: no "Reconnecting" note with a disabled Start`);
+  else coverage.add('lobby-offline-state');
+  await p.context.setOffline(false);
+  const back = await p.page.waitForFunction(() => {
+    const start = document.querySelector('#lobby [data-lobby="start"]');
+    return start && !start.disabled && !/Reconnecting/i.test(document.querySelector('#lobby-body')?.textContent || '');
+  }, null, { timeout: 10000 }).then(() => true).catch(() => false);
+  if (!back) fail(`${p.key}: lobby did not come back after going online again`);
+  p.offline = false;
 }
 
 async function doReactions(host, others) {
@@ -546,7 +611,7 @@ async function doRefresh(p) {
   if (s.meName !== before.name) fail(`${p.key}: after refresh my seat reads "${s.meName}", was "${before.name}"`);
   const s2 = await waitFor(p, x => x.controls > 0 || x.phase === 'Round over', 4000, 'controls after refresh').catch(e => { fail(e.message); return null; });
   if (s2 && !s2.controls) note(`${p.key}: after refresh mid-turn the turn had already passed`);
-  await shot(p, 'after-refresh');
+  shot(p, 'after-refresh');   // not awaited: the player keeps its turn going meanwhile
   coverage.add('refresh-rejoin');
 }
 
@@ -578,8 +643,11 @@ async function doTimeout(p, others) {
   await sleep(400);
   for (const o of [p, ...others]) {
     const s = await probe(o);
-    if (!s?.autoTags) fail(`${o.key}: no ⏱ tag in the log after the auto move`);
+    if (!s?.autoTags) { fail(`${o.key}: no ⏱ tag in the log after the auto move`); continue; }
+    const line = await o.page.evaluate(() => [...document.querySelectorAll('#log-list li')].filter(li => li.querySelector('.auto-tag')).pop()?.textContent || '');
+    if (!line.includes(p.name)) fail(`${o.key}: ⏱ tag is on "${line.trim()}", not on ${p.name}'s move`);
   }
+  coverage.add('auto-tag-line');
   await shot(others[0], 'auto-move');
 }
 
@@ -703,6 +771,11 @@ try {
   const results = await Promise.allSettled([hostLoop, annLoop, bobLoop]);
   for (const r of results) if (r.status === 'rejected') throw r.reason;
   coverage.add('game-finished');
+  // Leaving in the game's last round: no round-over follows, so there's nothing to forfeit at.
+  if (!done.forfeit && leftAt && !(host.ws.roundOvers || []).some(t => t >= leftAt)) {
+    done.forfeit = true;
+    log('the game ended in the round Bob left: forfeit at round end not reached this run');
+  }
   for (const [k, v] of Object.entries(done)) if (!v) fail(`scripted step "${k}" never happened (the game ended first?)`);
 
   // Game over → everyone is back in the same lobby with the result.
@@ -754,6 +827,16 @@ try {
     await waitFor(p, x => x.screen === 'setup', 5000, 'home after the final Leave');
   }
 
+  // Banners: how long each stayed up, and how many at once (finding #4).
+  for (const p of humans) {
+    const b = await p.page.evaluate(() => ({ list: window.__banners || [], max: window.__bannerMax || 0 })).catch(() => null);
+    if (!b) continue;
+    const long = b.list.filter(x => x.gone != null && x.gone - x.shown > 2600);
+    log(`${p.key}: ${b.list.length} banners since the last load, max ${b.max} in the layer at once, longest ${Math.round(Math.max(0, ...b.list.filter(x => x.gone).map(x => x.gone - x.shown)))}ms`);
+    if (long.length) note(`${p.key} (${p.size}): ${long.length} banner(s) stayed up > 2.6s, e.g. "${long[0].text}" ${Math.round(long[0].gone - long[0].shown)}ms`);
+  }
+  coverage.add('banner-timing');
+
   // Socket-level results.
   for (const p of humans) {
     for (const l of [...new Set(p.ws.leaks)]) fail(`${p.key}: hidden card in a view frame: ${l}`);
@@ -772,7 +855,7 @@ stopWrangler();
 
 const wanted = ['host-lobby', 'share-link-copied', 'list:open', 'bad-code-message', 'list:private', 'list:reopened', 'join-by-code', 'join-by-link',
   'bot-added', 'start', 'list:in-game', 'reaction', 'tomato', 'refresh-rejoin', 'timeout-auto', 'leave', 'late-joiner', 'forfeit-at-round-end',
-  'game-finished', 'rematch', 'phase:Lay down', 'phase:Stack or challenge', 'phase:Bidding', 'phase:Reveal', 'phase:Round over'];
+  'game-finished', 'rematch', 'lobby-offline-state', 'auto-tag-line', 'banner-timing', 'phase:Lay down', 'phase:Stack or challenge', 'phase:Bidding', 'phase:Reveal', 'phase:Round over'];
 console.log(`\nCoverage: ${[...coverage].sort().join(', ')}`);
 const missing = wanted.filter(w => !coverage.has(w));
 if (missing.length) console.log(`Not covered: ${missing.join(', ')}`);
