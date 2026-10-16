@@ -1,6 +1,7 @@
 name = "skull"
 main = "worker/index.js"
 compatibility_date = "2026-10-12"
+workers_dev = true
 routes = [{ pattern = "skull.xlobax.com", custom_domain = true }]
 assets = { directory = ".", binding = "ASSETS", run_worker_first = ["/api/*"] }
 

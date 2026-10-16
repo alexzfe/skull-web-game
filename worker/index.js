@@ -178,7 +178,8 @@ export class Room extends DurableObject {
     await this.ctx.storage.put({ room: core.toJSON(), listed: this.listed });
     const at = core.nextAlarm();
     if (at == null) await this.ctx.storage.deleteAlarm();
-    else await this.ctx.storage.setAlarm(Math.max(at, Date.now()));
+    // Never in the past: always a fresh time after the alarm that may be running now.
+    else await this.ctx.storage.setAlarm(Math.max(at, Date.now() + 1));
   }
 }
 

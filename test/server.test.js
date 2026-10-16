@@ -349,6 +349,18 @@ describe('game: actions and views', () => {
     assert.equal(h.state().players.filter(p => p.mat.length === 1).length, 2);
   });
 
+  test('an alarm that fires a few ms early still plays the due bot moves', () => {
+    // Cloudflare can run alarm() just before the time it was set for. If nothing
+    // counted as due, the room re-armed the same time, the alarm was dropped and
+    // the bots stalled for ~30s.
+    const h = started({ humans: 1, bots: 2 });
+    const at = h.room.nextAlarm();
+    h.t = at - 20;
+    h.deliver(h.room.tick());
+    assert.ok(h.state().players.some(p => p.mat.length === 1), 'the due bot moved');
+    assert.ok(h.room.nextAlarm() > at, 'never re-armed for the alarm already running');
+  });
+
   test('next round starts ~4s after round-over, server-timed', () => {
     const h = started({ humans: 3, timer: 20 });
     for (let i = 0; i < 200 && h.state().phase !== 'round-over'; i++) h.wait(20_000);

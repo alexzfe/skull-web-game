@@ -33,6 +33,10 @@ export const NEXT_ROUND_MS = 4_000;
 export const GAME_OVER_MS = 4_000;      // game-over view stays up, then back to the lobby
 export const REACT_MS = 2_000;
 export const BOT_DELAY_MS = [700, 1200];
+// Cloudflare can fire an alarm a few ms before the time it was set for; anything
+// due this close counts as due, so a timer is never re-armed for the alarm that
+// is already running (that alarm is then dropped and the room stalls).
+export const DUE_SLACK_MS = 100;
 export const DEFAULT_NAME = 'Rider';
 export const DEFAULT_AVATAR = { emoji: '💀' };
 const NAME_MAX = 16;
@@ -593,7 +597,7 @@ export class RoomCore {
   // One due timer per call; returns false when nothing is due.
   step() {
     const s = this.s;
-    const now = this.t;
+    const now = this.t + DUE_SLACK_MS;
     if (s.cleanupAt != null && s.cleanupAt <= now) {
       s.dead = true;
       s.game = null;
