@@ -130,3 +130,38 @@ Every server→client message also carries `serverNow` (server epoch ms).
 - **shell:** `view.players[i].isHuman` is `!isBot` for every seat, so use `view.me` (not `isHuman`) to find "you". Bots' `seats[i].isBot` → 🤖 badge. Also, I added `.wrangler/` to `.gitignore` (wrangler dev's local state); please keep it.
 - **net:** the client never sends `nextRound`; round-over → next round is server-timed (~4s). The clock offset is `serverNow - Date.now()` at receipt.
 - **QA:** run `npm run dev` (wrangler dev on :8787 by default; static files are served too, so the game is at `http://localhost:8787/`).
+
+## Net agent
+
+Delivered `src/net.js` (browser ES module, no deps) and `test/net.test.js` (fake WebSocket + fake timers; `node --test test/` green). The API summary is also at the top of `src/net.js`.
+
+### Exported API (for the shell)
+- `getToken()` → per-browser hex token, created once with `crypto.getRandomValues` and stored in `localStorage['skull.token']`. If storage is blocked it falls back to one in-memory token per page load.
+- `normalizeCode(str)` → `'KXPQ'` or `null`. It uppercases and ignores spaces and dashes. The code is valid only if it is exactly 4 letters from `ABCDEFGHJKLMNPQRSTUVWXYZ`.
+- `cleanCode(str)` → partial input for the join box: uppercase, valid letters only, at most 4. Auto-join when `cleanCode(v).length === 4`.
+- `shareLink(code)` → `${location.origin}/#/r/CODE`. `parseShareHash(location.hash)` → code or `null` (case-insensitive, trailing slash allowed).
+- `createRoom()` → `Promise<{code}>` (POST `/api/rooms`). `listLobbies()` → `Promise<[{code, host, humans, seats, bots, timer}]>` (GET `/api/lobbies`). Both throw on a non-2xx response.
+- `createRemoteController({ code, name, avatar, token?, base? })` connects at once and returns:
+  - `onView(cb)`: `cb(view, {seq, seats, deadline})`. Only views with `seq` greater than the last applied one are passed on.
+  - `onLobby(cb)`: `cb(lobby)`. `onEvent(cb)`: `cb({t:'event', e, from, kind, target?})`, so route `e === 'react'` to reactions. `onError(cb)`: `cb(msg)`.
+  - `onStatus(cb)`: `'connecting' | 'open' | 'reconnecting' | 'closed' | 'kicked' | 'not-found' | 'full'`. The last four are final, and the controller never reconnects after them. `status()` returns the current status.
+  - Every `on*` returns an unsubscribe function. `onView`, `onLobby` and `onStatus` call a new subscriber at once with the latest value, so a screen mounted late (e.g. lobby → game) gets the current table.
+  - `send(action)`: an engine action, sent as `{t:'action', action}`. `lobby(op, args)`: e.g. `lobby('options', {seats, timer, open})`, `lobby('kick', {seat})`, `lobby('start')`. `react(kind, target?)`. All three return `false` and drop the frame when the socket isn't open. Nothing is queued across a reconnect, because stale actions are worse than a re-tap.
+  - `now()` → server-corrected epoch ms. Compare it against `deadline.at` for the timer ring.
+  - `leave()`: sends `{t:'leave'}` (forfeit), closes, status `'closed'`. `close()`: closes for good without leaving, so the server treats the seat as disconnected. Use `close()` when the shell tears down for other reasons.
+  - The `code` and `token` properties are exposed too.
+- Every platform dependency (`WebSocket`, `fetch`, `storage`, `setTimeout`/`clearTimeout`, `clock`, `random`, `location`, `document`, `window`) can be passed in the same options object, for tests.
+
+### Behaviour and choices
+- `{t:'hello', name, avatar}` is sent on every socket open. The token is in the URL query (`?token=`).
+- Reconnect backoff: 0.5s, 1s, 2s, 4s, then 5s (cap), each ±20% jitter. The backoff resets once a message arrives on the new socket, not just on open, so a server that accepts and then drops at once doesn't cause a hot loop. When `visibilitychange` (visible) or `online` fires during a backoff wait, it retries at once. Both listeners are guarded, so Node works without `document`/`window`.
+- **Clock offset:** each message's `serverNow` gives the sample `serverNow − Date.now()`. The first sample is taken as-is, then an EMA with weight 0.25. Latency isn't compensated (≤ a few hundred ms, fine for a turn ring).
+- **Seq:** `lastSeq` is kept across reconnects, as §3 says. A view whose `seq` is ≤ the last applied one is dropped, even on a fresh socket.
+- **Not found:** a browser can't see the HTTP 404 behind a failed WebSocket upgrade. When a socket closes without ever opening, the controller does a plain `fetch` GET of the same `/api/rooms/:code/ws?token=…` URL. A 404 there means `'not-found'`; anything else keeps retrying. An invalid code goes straight to `'not-found'` without connecting.
+- **Error-message mapping:** a `{t:'error', msg}` matching `/full/i` gives `'full'`, and one matching `/not found|no such room|unknown room|doesn't exist/i` gives `'not-found'`. Both are final. Every error also reaches `onError`. `{t:'kicked'}` gives `'kicked'`.
+
+### Requests to the server agent
+1. `GET /api/rooms/:code/ws` **without** an `Upgrade` header must still answer **404** when the room doesn't exist. Do the room check before the upgrade check, because the client probes this way to detect not-found.
+2. `seq` must be monotonic for the room's whole lifetime, across rematches and DO hibernation/eviction (persist it), or clients will drop fresh views after a reconnect.
+3. Put `serverNow` (epoch ms) on **every** server→client message.
+4. The "Table full" error text should contain the word "full". If you'd rather use close codes, the client also understands `4001` kicked, `4004` not found and `4009` full.
