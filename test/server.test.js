@@ -690,3 +690,34 @@ describe('client requests (NOTES.md, net agent)', () => {
     for (let i = 1; i < seen.length; i++) assert.ok(seen[i] > seen[i - 1], `seq ${seen[i]} after ${seen[i - 1]}`);
   });
 });
+
+describe('lobby.me (shell request)', () => {
+  test('each recipient gets their own seat, null + meWaiting while waiting', () => {
+    const h = harness();
+    h.hello('a', 'Mo');
+    h.hello('b', 'Jo');
+    h.lobbyOp('a', 'addBot');
+    assert.deepEqual([h.lobby('a').me, h.lobby('a').meWaiting], [0, false]);
+    assert.deepEqual([h.lobby('b').me, h.lobby('b').meWaiting], [1, false]);
+    h.lobbyOp('a', 'start');
+    h.hello('w', 'Late');
+    assert.deepEqual([h.lobby('w').me, h.lobby('w').meWaiting], [null, true]);
+    assert.equal(h.lobby('a').me, h.seatOf('a'), 'in-game: me is the player id');
+    assert.equal(h.lobby('b').me, h.view('b').view.me);
+    // Back in the lobby the late joiner is seated.
+    h.send('a', { t: 'leave' });
+    h.send('b', { t: 'leave' });
+    const l = h.lobby('w');
+    assert.equal(l.phase, 'waiting');
+    assert.deepEqual([l.me, l.meWaiting], [l.members.find(m => m.name === 'Late').seat, false]);
+  });
+
+  test('host leaving in the lobby: everyone\'s me follows the reseat', () => {
+    const h = harness();
+    for (const tk of ['a', 'b', 'c']) h.hello(tk, tk);
+    h.send('a', { t: 'leave' });
+    assert.equal(h.lobby('b').me, 0);
+    assert.equal(h.lobby('c').me, 1);
+    assert.equal(h.lobby('b').hostSeat, 0);
+  });
+});

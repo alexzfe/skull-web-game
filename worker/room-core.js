@@ -668,8 +668,14 @@ export class RoomCore {
     return lobby;
   }
 
+  // Per recipient: `me` is your seat (null while waiting), `meWaiting` whether
+  // you're a late joiner waiting for the rematch.
   broadcastLobby() {
-    this.send('all', { t: 'lobby', lobby: this.lobby() });
+    const lobby = this.lobby();
+    for (const m of this.humans()) {
+      if (!m.connected) continue;
+      this.send(m.token, { t: 'lobby', lobby: { ...lobby, me: m.waiting ? null : m.seat, meWaiting: !!m.waiting } });
+    }
   }
 
   broadcastViews() {
