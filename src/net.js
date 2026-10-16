@@ -12,7 +12,8 @@
 //   rc.onLobby(cb)   cb(lobby)
 //   rc.onEvent(cb)   cb({e, from, kind, target?})       (reactions etc.)
 //   rc.onError(cb)   cb(msg)                            (server {t:'error'} messages)
-//   rc.onStatus(cb)  cb(status): 'connecting' | 'open' | 'reconnecting' | 'closed' | 'kicked' | 'not-found' | 'full'
+//   rc.onStatus(cb)  cb(status): 'connecting' | 'open' | 'reconnecting' | 'closed' | 'kicked' | 'not-found' | 'full' | 'replaced'
+//                    ('replaced' = another tab took this seat with the same token)
 //   rc.send(action)  engine action → true if it went out (the server fills in `player`)
 //   rc.lobby(op, args?)   host lobby ops: 'options' {seats, timer, open} · 'addBot' · 'removeBot' {seat} · 'kick' {seat} · 'start' · 'rematch'
 //   rc.react(kind, target?)
@@ -23,7 +24,7 @@
 // Every on*() returns an unsubscribe function. onView/onLobby/onStatus call a new
 // subscriber at once with the latest value they have, so a screen mounted late
 // still gets the current table. The controller reconnects on its own after any
-// close it didn't ask for; 'kicked', 'not-found', 'full' and 'closed' are final.
+// close it didn't ask for; 'kicked', 'not-found', 'full', 'replaced' and 'closed' are final.
 //
 // Everything platform-ish (WebSocket, fetch, storage, timers, clock, location,
 // document/window) can be injected through an options object, so this module
@@ -34,6 +35,7 @@ const CODE_RE = new RegExp(`^[${CODE_ALPHABET}]{4}$`);
 const TOKEN_KEY = 'skull.token';
 const BACKOFF_MS = [500, 1000, 2000, 4000, 5000];
 const OFFSET_SMOOTHING = 0.25;   // weight of a new serverNow sample
+const MAX_REFUSED = 2;           // failed upgrades with the server reachable → not-found
 
 const env = opts => ({
   WebSocket: opts.WebSocket ?? globalThis.WebSocket,
@@ -121,7 +123,7 @@ export async function listLobbies(opts = {}) {
 
 // ---------- remote controller ----------
 
-const FINAL = new Set(['closed', 'kicked', 'not-found', 'full']);
+const FINAL = new Set(['closed', 'kicked', 'not-found', 'full', 'replaced']);
 
 // Server {t:'error'} messages that end the session. Close codes are accepted too
 // in case the server prefers them (see NOTES.md, Net agent).
@@ -131,7 +133,17 @@ function finalStatusForError(msg) {
   if (/not found|no such room|unknown room|doesn.t exist/i.test(m)) return 'not-found';
   return null;
 }
-const CLOSE_CODE_STATUS = { 4001: 'kicked', 4004: 'not-found', 4009: 'full' };
+// Server close codes (NOTES.md, Server agent): 4000 replaced by another tab, 4001 kicked /
+// table full / after leave, 4002 room closed. 4004/4009 are harmless extras.
+// 'Table full' and leave() reach a final status first, so a later 4001 can't relabel them.
+function statusForClose(code, opened) {
+  if (code === 4000) return 'replaced';
+  if (code === 4001) return 'kicked';
+  if (code === 4002) return opened ? 'closed' : 'not-found';
+  if (code === 4004) return 'not-found';
+  if (code === 4009) return 'full';
+  return null;
+}
 
 export function createRemoteController({ code, name, avatar, token, base, ...opts } = {}) {
   const e = env(opts);
@@ -145,6 +157,7 @@ export function createRemoteController({ code, name, avatar, token, base, ...opt
   let status = null;
   let ws = null;
   let attempt = 0;          // failed connects since the last good one
+  let refused = 0;          // upgrades that failed while the server answered HTTP
   let retryTimer = null;
   let lastSeq = -Infinity;
   const last = { view: null, lobby: null };   // view entry is [view, meta]
@@ -179,6 +192,7 @@ export function createRemoteController({ code, name, avatar, token, base, ...opt
     sock.onopen = () => {
       if (ws !== sock) return;
       opened = true;
+      refused = 0;
       setStatus('open');
       sock.send(JSON.stringify({ t: 'hello', name, avatar }));
     };
@@ -189,11 +203,10 @@ export function createRemoteController({ code, name, avatar, token, base, ...opt
     };
     sock.onerror = () => { /* the close event follows */ };
     sock.onclose = ev => {
-      if (ws !== sock) return;
+      if (ws !== sock || FINAL.has(status)) return;
       ws = null;
-      const final = CLOSE_CODE_STATUS[ev?.code];
+      const final = statusForClose(ev?.code, opened);
       if (final) { finish(final); return; }
-      if (FINAL.has(status)) return;
       if (!opened) probeMissing();
       scheduleRetry();
     };
@@ -209,11 +222,18 @@ export function createRemoteController({ code, name, avatar, token, base, ...opt
   }
 
   // A browser can't see the 404 behind a failed upgrade, so ask over plain HTTP.
+  // A 404 settles it. The server may answer 426 (no Upgrade header) before it looks
+  // the room up, so if the server is reachable but the upgrade fails twice in a row,
+  // the room is treated as gone too. Network errors (offline) just keep retrying.
   function probeMissing() {
     if (!e.fetch) return;
     Promise.resolve()
       .then(() => e.fetch(`${origin || ''}${path}`))
-      .then(res => { if (res?.status === 404 && !FINAL.has(status)) finish('not-found'); })
+      .then(res => {
+        if (FINAL.has(status) || !res) return;
+        refused++;
+        if (res.status === 404 || refused >= MAX_REFUSED) finish('not-found');
+      })
       .catch(() => { /* offline — keep retrying */ });
   }
 
