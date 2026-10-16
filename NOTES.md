@@ -298,3 +298,95 @@ What it covers (MULTIPLAYER_SPEC §11), with 4 browser contexts:
 - Why not a config option: wrangler 4.151 has no setting or CLI flag to limit its assets watcher. It only skips `.wrangler/` and the persist dir. `dev.watch:false` is reachable only from the programmatic API, and it would also disable worker reloads.
 - Verified on :8791: the mirror holds exactly the deploy set (`/NOTES.md`, `/worker/index.js`, `/package.json` → 404). Writing `*.md`, `qa/shots/*.png` and `test/*` caused 0 reloads. Creating an app file reloaded and served it; deleting it reloaded and gave 404. `/api` routes are unchanged.
 - Deploy is untouched (`wrangler deploy` uploads "." per `wrangler.toml`). Worker behaviour is unchanged. `qa/mp-e2e.mjs` still spawns wrangler with its own snapshot, so it doesn't depend on this, but it could switch to `node worker/dev.mjs` and drop the snapshot.
+
+## Independent multiplayer audit (fresh context)
+
+Run on 2026-10-16 against master `d861fe6` with `npm run dev -- --port 8795` (local wrangler). I wrote this section before reading the earlier QA notes. Method: I read MULTIPLAYER_SPEC.md + SPEC.md and the code (`worker/`, `src/view.js`, `src/net.js`, the shell's MP files). Then I ran three things. (a) Raw-WebSocket probes in Node, 3–7 clients per room. (b) Playwright at 390x844 (mobile, touch) with 4–5 contexts: host, join from the list, join by link, join by typed lowercase code, full games through real clicks. (c) Timed cases run in parallel rooms: the 30s Off-clock, 90s abandon, 60s cleanup. `node --test test/`: 155/155. Screenshots: `qa/shots/audit-*.png`, downscaled to 390px wide.
+
+**Agility:** you get into a game fast. Host → lobby took 79ms. A guest saw the room in the open list after 34ms and was in the lobby 60ms after tapping it. Share link → name prompt → lobby took 67ms. A typed code auto-joins on the 4th letter, 274ms including typing. Host + 3 friends seated and the game started in under 6s of scripted taps.
+
+### Spec compliance
+
+| § | Requirement | Status | Evidence |
+|---|---|---|---|
+| 1 | Phones first | **partial** | Fine at 3–4 seats. At 5–6 seats your hand and buttons are below the fold (finding A1). |
+| 1/5 | Code + share link, no accounts; open list + code bubble | met | `audit-join-bubble.png`, `audit-link-prompt.png`, `audit-lobby-host.png` |
+| 1/6 | A bot never replaces a human; bots only as lobby filler | met | `forfeitSeat` / `clockAt`. Forfeited and disconnected humans get ⏱ moves, never `chooseAction`. |
+| 1 | Solo/tutorial offline | met (code) | `localController` path in `main.js`; no net imports used outside MP |
+| 2 | Worker + Static Assets + DOs, `wrangler.toml`, `.assetsignore` | met | `/worker/room-core.js`, `/NOTES.md`, `/package.json`, `/wrangler.toml`, `/test/*`, `/qa/*`, `/.git/config` → 404; `/src/view.js` → 200 |
+| 3 | `viewFor`: others' hands null, unrevealed mat null, `discarded` challenger-only, `view.me` | met | 351 view frames in a 4-seat game with a bot, plus all frames in the timed rooms: 0 leaks. Each frame was checked for hand faces, unrevealed mat cards, `discarded`, `lastAction.card` / `cardIndex` and unexpected keys. |
+| 3 | No x-ray in MP; `lastAction` redacted, `auto: true` on ⏱ | met | `redactAction`; ⏱ frames carry `auto:true` (Off-clock and abandon runs) |
+| 3 | Full snapshots with `seq`; client drops stale ones; current view sent on (re)connect | met | `net.js` `msg.seq <= lastSeq`; refresh mid-reveal re-rendered in 128ms (`audit-after-refresh-reveal.png`) |
+| 4 | `POST /api/rooms`, `GET /api/lobbies` shape, WS 404 on a missing room | met | Listing `{code,host,humans,seats,bots,timer}`. `ZZZZ`, `OOOO` and `zz` → 404. |
+| 4 | Server overwrites `action.player`, checks `legalActions`, `{t:'error'}` | met | `placeInitial` spoofed as player 2 landed on the sender's own seat. `nextRound`, `forfeit`, `bid 99` → "Illegal action". Guest `start` / `kick` → "Only the host can do that". Garbage / non-JSON → "Bad message" or dropped. |
+| 4 | `view` carries `seats` + `deadline` + `serverNow` | met | Frame keys `t, seq, view, seats, deadline, serverNow`. `deadline` is null with the timer Off and everyone connected. |
+| 5 | Code alphabet (no O/I), case-insensitive input | met | Typing `k0x1` keeps `KX`; a lowercase typed code joins |
+| 5 | Token in `skull.token`; same token rejoins the same seat | met | Refresh mid-reveal → same seat, flip still available. A second tab takes over (old socket closes 4000 → "Open somewhere else", `audit-replaced-dialog.png`); "Use here" takes it back. |
+| 5 | Host options remembered; seats 3–6; timer Off/20/30/60; Open/Private | met | `skull.hostOptions`; Private → gone from `/api/lobbies` within 400ms |
+| 5 | Start with ≥3 seats, 1 human + bots OK | met | 1 human + 2/4/5 bots started (fold measurement runs) |
+| 5 | Names: blank → Rider, ≤16, dedupe " 2" | met | "Ann", "Ann 2"; blank → "Rider"; the 16-char cap is in `cleanName` (code only; I didn't send a longer name) |
+| 5 | Kick: host only, lobby only | met, see A2 | Kick mid-game → "Game in progress". The kick is also a permanent ban (A2). |
+| 5 | Host leaves → longest-seated human | met | Leave in the lobby moved host to H2. Abandon mid-game moved host to seat 1 at 90.0s. |
+| 5 | Late joiners wait (`waiting:true`), seated at rematch; in-game rooms not listed | met | `meWaiting:true`, no views. Seated after the game (took the bot's seat, see note C1). `listedInGame:false`. |
+| 5 | Humans + bots + waiting ≤ 6 → "Table full" | met | 7th human in the lobby → error "Table full" + close 4009. In-game 6-seat table → same, and the link prompt says "That table is full." (`audit-table-full-ingame.png`). |
+| 5 | Game over → same lobby with result; Rematch one tap | met | `audit-lobby-result.png`; rematch reached a new game |
+| 5 | Cleanup 60s after the last human goes; delisted at once | met | Delisted 0.8s after all sockets closed. Probe at ~51s → 426 (alive), at ~63s → 404. |
+| 6 | Clock for the active seat(s); all unplaced seats share it in place-initial | met | 20s timer: idle host auto-placed at ~20s; rings on all unplaced seats (`audit-table-start.png`) |
+| 6 | ⏱ auto moves: bidding pass, place random, empty hand min bid, reveal own then random, visibly marked | met | "⏱ Alex places a card" in the log + toast (`audit-auto-move.png`). Challenger-forfeit reveals went own stack first, then random opponents. |
+| 6 | 5s nudge, soft tick, no vibration, 🔊 toggle (`skull.sound`) | met | Nudge seen ~15s into a 20s clock (`audit-nudge.png`); no `vibrate` in `src/` |
+| 6 | Disconnect: 📡, normal clock; timer Off → 30s clock | met | Off + disconnect: deadline 30000ms, auto `placeInitial` after 30.02s. 📡 on the seat (`audit-disconnected-seat.png`). |
+| 6 | Abandon after 90s → forfeit; may return for the rematch | met | Forfeited at 90.02s (7 ⏱ moves meanwhile). Rejoin mid-game → `meWaiting:true`. |
+| 6 | Forfeit: greyed "X left", instant ⏱ moves for the rest of the round, engine forfeit at round end, last active player wins | met | Challenger left after 1 of 6 flips: 5 instant auto reveals, round-over, `forfeit`, round 2 starts with the next active player. Then one of 2 left mid-round: the remaining player finished the round and won (`audit-after-leave.png`). |
+| 6 | No humans left → game ends | met (code + test) | `forfeitSeat` → `finishGame` |
+| 6 | Bots 700–1200ms server-side; next round ~4s, no tap-skip | met | round-over → place-initial in ~3.5–4s; `nextRound` from a client → "Illegal action" |
+| 7 | Home: avatar ◀▶ + name, HOST, JOIN bubble (auto-join on 4th letter), Play vs bots, Learn | met | `audit-home.png`. The open list lives inside the bubble (spec calls that layout provisional). |
+| 7 | 12 avatar emojis; `avatar` opaque `{emoji}` | met, see A5 | The server takes any object ≤300 chars JSON |
+| 7 | Share link skips home: name prompt (pre-filled) → lobby | met | `audit-link-prompt.png` |
+| 7 | Lobby: code + copy/share, seats with avatar/🤖/📡, host options, Start, Leave | met | `audit-lobby-full-host.png`, `audit-lobby-guest.png`, `audit-lobby-6-seats.png` |
+| 7 | Game: timer ring, 📡 / greyed "left", ⏱ tags, Leave with confirm | met | `audit-leave-confirm.png` ("Leaving forfeits the game."), `audit-disconnected-seat.png` |
+| 8 | Engine `forfeit` (round-over only, nextActive first player, last-standing win) + tests | met | 13 `forfeit` mentions in `test/engine.test.js`; observed live |
+| 9 | 5 pop-ups + 🍅 at a target; 1 per 2s; unknown kinds dropped | met | 6 rapid `laugh` → 1 event; `nuke` / `bogus` dropped; tomato `target` delivered (`audit-reactions-open.png`, `audit-reaction-received.png`) |
+| 11 | `view` / `server` / `net` tests | met | 155/155 |
+| — | XSS via names/avatars from a raw client | met (safe) | `<img onerror>` name and `<svg onload>` avatar shown as text in the lobby, seats, log and "left" toast; nothing executed (`audit-xss-names.png`) |
+
+### Findings, most severe first
+
+**A1. At 5–6 seats on a phone, your cards and action buttons are below the fold (medium, owner: shell).**
+Repro: 390x844, host, add bots to 5 or 6 seats, start. Measured with no scroll: `#me-seat` 676–850, `#controls` 860–920, `#hand` 932–1055, document 1142 tall. At 3–4 seats everything fits (hand 705–827). Nothing scrolls the controls into view when it becomes your move.
+Expected: phones first (§1); a clock is running and the §6 nudge should be visible.
+Actual: "YOUR MOVE" in the status line, but the cards and the bid/pass buttons are off screen. The 5s nudge shakes a seat at the bottom edge (`audit-table-6-seats.png`, `audit-nudge.png`). The same layout exists in solo with 4–5 opponents, but the turn timer makes it matter in MP.
+Suggestion: make the opponent seats more compact at ≥4 opponents, or scroll `#controls` into view when your turn starts.
+
+**A2. Kick is a one-tap, permanent ban (medium, owner: shell for the confirm, server for the ban).**
+Repro: as host, tap ✕ next to a friend in the lobby. There's no confirm step. The ✕ sits beside every human's name, where a mis-tap on a phone is easy. The server puts the token in `s.kicked` for the room's lifetime. Every later `hello` from it (link, code, refresh) gets `{t:'kicked'}` + close 4001, and the client says "The host kicked you from the table."
+Expected: §5 only says "host only, lobby only". A ban isn't specified, and the friends-on-voice context makes mis-kicks likely.
+Actual: no confirm and no undo. The friend can't come back until the room dies.
+Suggestion: add a confirm ("Kick Bea?"), and let a kicked player rejoin by link (kick = remove), or ban only on a second kick.
+
+**A3. The multiplayer game-over moment is underplayed (low, owner: shell).**
+In MP there's no game-over banner or modal. For 4s the table shows the last challenge result ("Snakes wins the challenge") with the prompt "Game over. Back to the lobby in a moment…", and the status line says "Snakes wins" (`audit-gameover-mp.png`). Then the lobby card says "Snakes won the last game" (`audit-lobby-result.png`). It works, but the win of the night reads like an ordinary round end. Suggestion: show a big winner banner (avatar + "X wins the game!") for those 4s.
+
+**A4. The "Open somewhere else" dialog shows "📡 Reconnecting…" behind it (low, owner: shell).**
+`lobby-ui.js` treats any status other than `open` as offline. With status `replaced`, the lobby behind the dialog says "📡 Reconnecting…" and greys out, but nothing is reconnecting (`audit-replaced-dialog.png`). Suggestion: show the 📡 note only for `connecting` / `reconnecting`.
+
+**A5. An avatar can be any text (low, owner: server; shell could also clip).**
+`cleanAvatar` accepts any object up to 300 chars of JSON, so a raw client can set `emoji` to a long string. It's escaped (no XSS), but it spills over the seat card and can mimic UI text such as "👑 host" (`audit-xss-names.png`). Suggestion: until the skull builder lands, clamp `emoji` to the 12 picker emojis or one short grapheme cluster, and clip `.ls-av` / seat avatars.
+
+**A6. A ⏱ toast covers the mobile status line (low, owner: shell).** "⏱ You lay down a card" sits over "… thinking…" in the top bar (`audit-auto-move.png`).
+
+**A7. Info (server): late joiners get reaction events.** `react` broadcasts to `'all'` sockets, including waiting late joiners and members still in the lobby. The client ignores them off the table, so this is harmless. Suggestion: send only to in-game members.
+
+**A8. Info (server): duplicate frame on Leave.** When a Leave lands at round-over, two consecutive views carry the same `lastAction` (`forfeit`, `n=14`): `forfeitSeat` → `advance` broadcasts, then `leave()` broadcasts again. The `seq` differs and nothing breaks, so this is only an extra frame.
+
+**A9. Info (shell): the solo subtitle sits under the wrong button.** On home, "vs 3 rival gangs · riding as Rider" sits under **Learn to play**, but it describes **Play vs bots** (`audit-home.png`).
+
+**Notes / not findings**
+- **C1 (spec ambiguity, server's documented choice):** a human joining a full lobby takes a bot's seat. This includes a waiting late joiner at game end: in my run the host-added Panthers bot was dropped to seat "Late". It's consistent with "filler" bots, but Alex may want to confirm that a bot the host added can vanish on rematch.
+- **Not verified in a browser:** client-side phone-lock behaviour (your own 📡 pill). Playwright `context.setOffline(true)` didn't drop the already-open WebSocket in headless Chromium, so the pill never showed (inconclusive, not a bug). The server-side disconnect path was verified by closing a tab: 📡 on the seat, normal clock, ⏱ moves, abandon at 90s.
+- **Adversarial cases that behaved per spec:** two tabs on one token; host disconnected mid-game (host kept until the 90s abandon, then moved to seat 1); forfeit as challenger mid-reveal; forfeit leaving one active player (winner at round end); 7th joiner in the lobby and in-game; timer Off + disconnect (30.0s); kick in the lobby (and rejected mid-game); late joiner; Private hidden; invalid codes; reaction spam; illegal / foreign actions; card faces in raw frames (none); cleanup at ~60s; refresh during reveal.
+
+### Duplicates of the earlier QA notes
+- **A6** duplicates "Mobile toasts hide the turn cue" (Final regression, new findings).
+- **A4** is new. It's a side effect of the fix for QA #1 (the offline lobby note now also shows for the final `replaced` status).
+- **C1** and the forfeit clearing the mat are documented server choices under "Server agent → Behaviour choices", so they aren't findings.
+- **A1, A2, A3, A5, A7, A8, A9** are new. QA's "no horizontal scroll at 390px" still holds; A1 is about vertical fold, which they didn't check.
