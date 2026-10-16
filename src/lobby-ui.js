@@ -52,8 +52,10 @@ export function createLobbyUI(h) {
     const parts = [];
 
     // Off the socket nothing we send would arrive, so the host buttons wait for it.
+    // The 📡 note only while the socket is coming back, not for final statuses
+    // like 'replaced' (that one has its own dialog).
     const offline = status !== 'open';
-    if (offline) parts.push(`<p class="lobby-note warn">${STATUS_TEXT.reconnecting}</p>`);
+    if (status === 'connecting' || status === 'reconnecting') parts.push(`<p class="lobby-note warn">${STATUS_TEXT.reconnecting}</p>`);
     if (lobby.lastWinner && !inGame) {
       const w = lobby.lastWinner;
       const you = me && !me.waiting && w.name === me.name;

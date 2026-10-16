@@ -698,3 +698,46 @@ body:has(.coach-root.lock:not([hidden])) .banner-layer { opacity: .18; }
 @media (hover: none) {
   .btn:hover, .card.playable:hover, .card.discardable:hover, .seat.target:hover { transform: none; }
 }
+
+/* Crowded table (4+ opponents) on a phone: compact seat cards so your seat, the
+   controls and your hand stay above the fold. ui.js sets #game.crowded. */
+@media (max-width: 640px) {
+  #game.crowded .opponents { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px 5px; }
+  #game.crowded .opponents .seat {
+    --cw: 24px;
+    display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; justify-items: start;
+    grid-template-areas: "av name name" "mat mat wins" "mat mat hand" "badges badges badges";
+    gap: 2px 4px; padding: 5px 5px 4px;
+  }
+  #game.crowded .opponents .seat-head { display: contents; }
+  #game.crowded .opponents .seat-av { grid-area: av; width: 20px; height: 20px; font-size: 12px; overflow: visible; }
+  #game.crowded .opponents .seat-name { grid-area: name; font-size: 12px; letter-spacing: .02em; justify-self: stretch; text-align: left; }
+  #game.crowded .opponents .thinking-dots { grid-area: name; justify-self: end; }
+  #game.crowded .opponents .wins { grid-area: wins; flex-direction: column; justify-self: center; }
+  #game.crowded .opponents .wins i { width: 9px; height: 9px; }
+  #game.crowded .opponents .mat { grid-area: mat; justify-self: center; }
+  #game.crowded .opponents .hand-mini { grid-area: hand; flex-wrap: wrap; width: 26px; gap: 2px; justify-self: center; }
+  #game.crowded .opponents .hand-mini i { width: 9px; height: 13px; }
+  #game.crowded .opponents .badges { grid-area: badges; justify-self: stretch; min-height: 0; gap: 2px; }
+  #game.crowded .opponents .badge { padding: 0 5px; font-size: 9px; line-height: 15px; letter-spacing: .06em; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #game.crowded .stack-count { min-width: 18px; height: 18px; border-radius: 9px; font-size: 11px; padding: 0 4px; }
+  #game.crowded .opponents .flip-hint { font-size: 10px; padding: 1px 6px; }
+  #game.crowded .table { padding-top: 16px; gap: 8px; }
+  #game.crowded .center { padding: 4px 6px 2px; }
+  #game.crowded .pot { width: 62px; height: 62px; }
+  #game.crowded .pot-num { font-size: 24px; }
+  #game.crowded .pot-label { font-size: 8px; max-width: 54px; }
+
+  #game.crowded .me-seat { --cw: 36px; }
+  #game.crowded .me-seat .seat {
+    display: grid; grid-template-columns: auto auto; justify-content: center; align-items: center;
+    grid-template-areas: "mat head" "mat badges" "mat owned"; gap: 2px 12px; padding: 6px 10px;
+  }
+  #game.crowded .me-seat .seat-head { grid-area: head; width: auto; justify-content: flex-start; }
+  #game.crowded .me-seat .mat { grid-area: mat; }
+  #game.crowded .me-seat .badges { grid-area: badges; justify-content: flex-start; min-height: 0; }
+  #game.crowded .me-seat .owned { grid-area: owned; }
+  #game.crowded .player-zone { padding: 8px 10px; gap: 8px; }
+  #game.crowded .me-right { gap: 8px; }
+  #game.crowded .controls { min-height: 0; }
+}

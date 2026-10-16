@@ -130,12 +130,12 @@
         </div>
         <div class="cta">
           <button id="play-now" class="btn big play-now" type="submit">Play vs bots</button>
+          <p id="play-sub" class="play-sub">vs 3 rival gangs · riding as Rider</p>
           <button id="learn" class="btn learn" type="button" data-cmd="learn">
             <span class="learn-bones" data-bones="grin" aria-hidden="true"></span>
             <span class="learn-text">Learn to play <small>60s</small></span>
           </button>
         </div>
-        <p id="play-sub" class="play-sub">vs 3 rival gangs · riding as Rider</p>
         <details id="table-settings" class="table-settings">
           <summary>Table settings</summary>
           <div class="settings-body">
@@ -228,6 +228,13 @@
       </aside>
     </div>
     <div id="toasts" class="toasts" aria-live="polite"></div>
+    <div id="mp-winner" class="mp-winner" role="status" hidden>
+      <div class="mpw-card">
+        <div class="mpw-av"><span class="mpw-crown" aria-hidden="true">👑</span><span id="mpw-emoji"></span></div>
+        <h2 id="mpw-title" class="mpw-title"></h2>
+        <p class="mpw-sub">Back to the lobby in a moment…</p>
+      </div>
+    </div>
   </section>
 
   <!-- ===== Rules ===== -->
@@ -257,6 +264,16 @@
       <div class="modal-actions">
         <button class="btn danger" value="leave" data-mp="leave-yes">Leave</button>
         <button class="btn primary" value="stay" autofocus>Stay</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="kick-confirm" class="modal small-modal">
+    <form method="dialog" class="modal-body center-text">
+      <h2>Kick <span id="kick-name"></span>?</h2>
+      <p class="lead">They can’t rejoin this table.</p>
+      <div class="modal-actions">
+        <button class="btn danger" value="kick" data-mp="kick-yes">Kick</button>
+        <button class="btn primary" value="keep" autofocus>Keep</button>
       </div>
     </form>
   </dialog>

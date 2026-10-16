@@ -93,7 +93,7 @@ export function createUI(handlers) {
     me: $('#me-seat'), controls: $('#controls'), hand: $('#hand'),
     log: $('#log-list'), logDetails: $('#log-details'),
     banners: $('#banner-layer'), toasts: $('#toasts'),
-    rules: $('#rules'), gameover: $('#gameover'),
+    rules: $('#rules'), gameover: $('#gameover'), winner: $('#mp-winner'),
     newGameBtn: $('#game .top-actions [data-cmd="new-game"]'),
     leaveBtn: $('#game .top-actions [data-cmd="leave"]'), soundBtn: $('#game .top-actions [data-cmd="sound"]'),
   };
@@ -110,6 +110,7 @@ export function createUI(handlers) {
   let shown = new Map();      // pid -> { len, revealed } as last rendered (for animations)
   let logLen = 0;
   let wasXray = false;
+  let wasMyMove = false;
 
   const readSettings = () => ({
     name: el.name.value.trim().slice(0, 16),
@@ -215,7 +216,9 @@ export function createUI(handlers) {
     el.toasts.innerHTML = '';
     bidValue = null;
     wasXray = false;
+    wasMyMove = false;
     closeGameOver();
+    hideWinner();
   }
 
   // ---------- render ----------
@@ -244,6 +247,7 @@ export function createUI(handlers) {
     el.table.classList.toggle('xray', !!view.xray);
     const opp = seatOrder(state.players.length, human).map(id => state.players[id]);
     el.opponents.style.setProperty('--n', opp.length);
+    el.game.classList.toggle('crowded', opp.length >= 4);   // compact seats on phones
     el.opponents.innerHTML = opp.map((p, k) => seatHTML(p, ctx, k, opp.length)).join('');
     el.me.innerHTML = seatHTML(state.players[human], ctx, 0, 1, true);
     el.center.innerHTML = centerHTML(state, view);
@@ -254,6 +258,22 @@ export function createUI(handlers) {
 
     shown = new Map(state.players.map(p => [p.id, { len: p.mat.length, revealed: p.revealed }]));
     wasXray = !!view.xray;
+    const myMove = actions.length > 0;
+    if (myMove && !wasMyMove && view.autoScroll) revealControls();
+    wasMyMove = myMove;
+    el.game.classList.toggle('my-move', myMove);
+    if (myMove && coversStatus()) [...el.toasts.children].forEach(t => { if (!t.classList.contains('bad')) t.remove(); });
+  }
+
+  // Your move just started: if your buttons or hand are off screen, bring them up.
+  function revealControls() {
+    requestAnimationFrame(() => {
+      const zone = el.hand.parentElement;
+      const r = zone.getBoundingClientRect();
+      if (r.bottom <= window.innerHeight && r.top >= 0) return;
+      const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      zone.scrollIntoView({ block: r.height > window.innerHeight ? 'start' : 'end', behavior: smooth ? 'smooth' : 'auto' });
+    });
   }
 
   // After a lost challenge the engine returns the challenger's mat to their hand at
@@ -359,10 +379,10 @@ export function createUI(handlers) {
   // a second animation turns it red for the last NUDGE_MS.
   function avatarHTML(avatar, clock, ring) {
     const emoji = esc(avatar?.emoji || '💀');
-    if (!clock) return `<span class="seat-av">${emoji}</span>`;
+    if (!clock) return `<span class="seat-av"><span class="av-e">${emoji}</span></span>`;
     const elapsed = clock.total - ring.left;
     const style = `animation-duration:${clock.total}ms,300ms;animation-delay:${-Math.round(elapsed)}ms,${Math.round(ring.left - NUDGE_MS)}ms`;
-    return `<span class="seat-av">${emoji}<svg class="ring" viewBox="0 0 40 40" aria-hidden="true">
+    return `<span class="seat-av"><span class="av-e">${emoji}</span><svg class="ring" viewBox="0 0 40 40" aria-hidden="true">
       <circle class="ring-bg" cx="20" cy="20" r="18" pathLength="100"/>
       <circle class="ring-fg" cx="20" cy="20" r="18" pathLength="100" style="${style}"/></svg></span>`;
   }
@@ -607,7 +627,12 @@ export function createUI(handlers) {
     el.banners.innerHTML = '';
   }
 
+  // On phones the multiplayer toast sits over the status line: while that line
+  // says "Your move", only errors may cover it.
+  const coversStatus = () => el.game.classList.contains('mp') && window.matchMedia('(max-width: 900px)').matches;
+
   function toast(text, kind = '') {
+    if (kind !== 'bad' && el.game.classList.contains('my-move') && coversStatus()) return;
     const node = document.createElement('div');
     node.className = `toast ${kind}`;
     node.textContent = text;
@@ -632,7 +657,18 @@ export function createUI(handlers) {
 
   function closeGameOver() { if (el.gameover.open) el.gameover.close(); }
 
+  // Multiplayer game over: the winner's moment, until the server sends everyone back
+  // to the lobby. Not a modal, so Leave and reactions still work.
+  function showWinner({ name, emoji, you }) {
+    $('#mpw-emoji').textContent = emoji || '💀';
+    $('#mpw-title').textContent = you ? 'You win the game!' : `${name} wins the game!`;
+    el.winner.classList.toggle('you', !!you);
+    el.winner.hidden = false;
+  }
+
+  function hideWinner() { el.winner.hidden = true; }
+
   function setFastBanners(on) { fastBanners = !!on; }
 
-  return { render, showSetup, showGame, showScreen, setMode, setSoundIcon, nudge, reset, banner, toast, showGameOver, setFastBanners };
+  return { render, showSetup, showGame, showScreen, setMode, setSoundIcon, nudge, reset, banner, toast, showGameOver, showWinner, hideWinner, setFastBanners };
 }

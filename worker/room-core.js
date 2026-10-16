@@ -64,14 +64,28 @@ export function cleanName(name) {
 }
 
 // Avatars are opaque small objects ({emoji} now, skull-builder parts later).
+// Other keys pass through (capped by size); `emoji` must be one short grapheme
+// so a raw client can't put text on the seat cards.
+const AVATAR_MAX_JSON = 300;
+const EMOJI_MAX = 16;
+const graphemes = typeof Intl !== 'undefined' && Intl.Segmenter
+  ? s => [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(s)].length
+  : s => [...s].length;
+
 export function cleanAvatar(avatar) {
   if (!avatar || typeof avatar !== 'object' || Array.isArray(avatar)) return { ...DEFAULT_AVATAR };
+  let out;
   try {
     const json = JSON.stringify(avatar);
-    return json.length <= 300 ? JSON.parse(json) : { ...DEFAULT_AVATAR };
+    if (json.length > AVATAR_MAX_JSON) return { ...DEFAULT_AVATAR };
+    out = JSON.parse(json);
   } catch {
     return { ...DEFAULT_AVATAR };
   }
+  const e = out.emoji;
+  const ok = typeof e === 'string' && e.length > 0 && e.length <= EMOJI_MAX && !/\s/.test(e) && graphemes(e) === 1;
+  if (!ok) out.emoji = DEFAULT_AVATAR.emoji;
+  return out;
 }
 
 export class RoomCore {
@@ -636,7 +650,8 @@ export class RoomCore {
       ev.target = target;
     }
     m.lastReact = this.t;
-    this.send('all', ev);
+    // Only seated players at the table: lobby members and late joiners have no use for it.
+    for (const x of this.humans()) if (x.connected && this.inGame(x)) this.send(x.token, ev);
   }
 
   // ---------- outgoing ----------

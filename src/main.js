@@ -249,6 +249,7 @@ function render(shownState = state, locked = !!holdTimer) {
   shown = { state: shownState, locked };
   local.sink?.(localView(shownState), {
     locked, ghost: maskGhost(ghost), xray,
+    autoScroll: !director,   // a director (tutorial, tips) positions its own bubbles
     // a director with onGameOver may own the ending: keep the default controls back until it declines
     gameOverControls: gameOverUI === 'default' || (gameOverUI == null && typeof director?.onGameOver !== 'function'),
     autoNextMs: autoNextAt != null && shownState === state ? Math.max(0, autoNextAt - Date.now()) : null,
@@ -410,11 +411,29 @@ const lobbyUI = createLobbyUI({
   },
   onAddBot: () => lobbySend('addBot'),
   onRemoveBot: seat => lobbySend('removeBot', { seat }),
-  onKick: seat => lobbySend('kick', { seat }),
+  onKick: confirmKick,
   onStart: () => lobbySend(mp?.lobby?.lastWinner ? 'rematch' : 'start'),
   onLeave: leaveRoom,
   onShare: shareRoom,
 });
+
+// A kick is final (the server bans the token for the room's life): ask first.
+function confirmKick(seat) {
+  const m = mp?.lobby?.members.find(x => x.seat === seat && !x.waiting && !x.isBot);
+  if (!m) return;
+  mp.kickTarget = { seat, name: m.name };
+  document.getElementById('kick-name').textContent = m.name;
+  const d = document.getElementById('kick-confirm');
+  if (!d.open) d.showModal();
+}
+
+function kickConfirmed() {
+  const k = mp?.kickTarget;
+  if (!k) return;
+  mp.kickTarget = null;
+  // Seats shift when someone leaves: only kick if the same player is still there.
+  if (mp.lobby?.members.some(x => x.seat === k.seat && !x.waiting && x.name === k.name)) lobbySend('kick', { seat: k.seat });
+}
 
 function loadHostOptions() {
   try { return parseHostOptions(JSON.parse(localStorage.getItem(HOST_OPTIONS_KEY))); } catch { return parseHostOptions(null); }
@@ -484,6 +503,8 @@ function closeRoom() {
   s.unsubs.forEach(u => u());
   clearTimeout(s.holdTimer);
   clearTimeout(s.nudgeTimer);
+  clearTimeout(s.winnerTimer);
+  ui.hideWinner();
   destroyReactions(s);
   s.rc.close();
   if (controller === s.controller) controller = null;
@@ -506,7 +527,7 @@ function leaveSolo() {
 }
 
 function closeDialogs() {
-  for (const id of ['leave-confirm', 'replaced']) {
+  for (const id of ['leave-confirm', 'replaced', 'kick-confirm']) {
     const d = document.getElementById(id);
     if (d.open) d.close();
   }
@@ -514,7 +535,8 @@ function closeDialogs() {
 }
 
 function failJoin(text) {
-  const from = mp?.from;
+  // Once in the room (kicked, table closed) the join form is long gone: go home.
+  const from = mp?.joined ? null : mp?.from;
   closeRoom();
   clearRoomHash();
   if (from === 'link') { home.linkMessage(text); return; }
@@ -649,7 +671,9 @@ function destroyReactions(s) {
 function endTable() {
   clearTimeout(mp.holdTimer);
   clearTimeout(mp.nudgeTimer);
-  mp.holdTimer = mp.nudgeTimer = null;
+  clearTimeout(mp.winnerTimer);
+  mp.holdTimer = mp.nudgeTimer = mp.winnerTimer = null;
+  ui.hideWinner();
   destroyReactions(mp);
   closeDialogs();
   mp.view = null;
@@ -674,8 +698,10 @@ function onView(view, meta) {
   }
   const fresh = prev && a && a.n !== prev.lastAction?.n;
   if (view.phase === 'place-initial') mp.ghost = null;
+  const gameOver = fresh && view.phase === 'game-over' && prev.phase !== 'game-over';
+  if (gameOver) scheduleWinner(view, meta);
   if (fresh) {
-    announce(quietUI(a), prev, view, a);
+    announce(gameOver ? noWinBanner(quietUI(a)) : quietUI(a), prev, view, a);
     if (a.type === 'reveal' && prev.phase === 'reveal' && view.phase !== 'reveal') {
       holdFinalFlip(prev, view, a);
       scheduleNudge();
@@ -685,6 +711,23 @@ function onView(view, meta) {
   if (!mp.holdTimer) renderTable();
   scheduleNudge();
 }
+
+// Game over: let the final flip land, then the winner's moment until the lobby.
+const WINNER_DELAY_MS = 900;
+function scheduleWinner(view, meta) {
+  clearTimeout(mp.winnerTimer);
+  const w = view.players[view.winner];
+  if (!w) return;
+  const session = mp;
+  mp.winnerTimer = setTimeout(() => {
+    session.winnerTimer = null;
+    if (mp !== session || session.screen !== 'game') return;
+    ui.showWinner({ name: w.name, emoji: meta.seats?.[w.id]?.avatar?.emoji, you: w.id === view.me });
+  }, WINNER_DELAY_MS);
+}
+
+// The winner's moment replaces the short win banner.
+const noWinBanner = sink => ({ ...sink, banner: (text, o = {}) => { if (o.kind !== 'win') sink.banner(text, o); } });
 
 // Like the local game: keep the last flip on screen for a moment before the
 // post-reveal board (the challenger's cards may already be back in hand).
@@ -709,7 +752,7 @@ function holdFinalFlip(prev, view, a) {
 function renderTable(shownView = mp.view, locked = !!mp.holdTimer) {
   if (!shownView) return;
   ui.render(shownView, {
-    mp: true, locked, ghost: mp.ghost,
+    mp: true, locked, ghost: mp.ghost, autoScroll: true,
     seats: mp.meta?.seats ?? [],
     clocks: seatClocks(mp.meta?.deadline, { timer: mp.lobby?.options?.timer ?? 0 }),
     now: mp.rc.now(),
@@ -717,9 +760,13 @@ function renderTable(shownView = mp.view, locked = !!mp.holdTimer) {
 }
 
 // Routine moves are already in the log and on the seats; in multiplayer they'd
-// stack up as toasts over the table. ⏱ moves and a lost card still toast.
+// stack up as toasts over the table. ⏱ moves and a lost card still toast, except
+// your own ⏱ move on a phone, where the toast would sit on the status line (the
+// log tags it).
 const ROUTINE = new Set(['placeInitial', 'place', 'pass', 'reveal', 'discard', 'chooseFirst']);
+const NO_OWN_AUTO_TOAST = { ...ui, toast: (text, kind) => { if (!text.startsWith('⏱')) ui.toast(text, kind); } };
 function quietUI(a) {
+  if (a.auto && a.player === mp.view?.me && window.matchMedia('(max-width: 900px)').matches) return NO_OWN_AUTO_TOAST;
   if (a.auto || !ROUTINE.has(a.type)) return ui;
   return { ...ui, toast: (text, kind) => { if (a.type === 'reveal' && kind !== 'good') ui.toast(text, kind); } };
 }
@@ -757,6 +804,7 @@ document.addEventListener('click', e => {
   if (!b) return;
   switch (b.dataset.mp) {
     case 'leave-yes': leaveRoom(); break;
+    case 'kick-yes': kickConfirmed(); break;
     case 'use-here': if (mp) openRoom(mp.code, { from: 'rejoin' }); break;
     case 'go-home': closeRoom(); clearRoomHash(); toSetup(); break;
   }

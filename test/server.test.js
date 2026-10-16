@@ -2,7 +2,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { ROSE, SKULL, createGame, applyAction, legalActions } from '../src/engine.js';
 import {
-  RoomCore, actors, autoAction, BOTS, REACTIONS, ERR, CLOSE,
+  RoomCore, cleanAvatar, actors, autoAction, BOTS, REACTIONS, ERR, CLOSE,
   ABANDON_MS, CLEANUP_MS, NEXT_ROUND_MS, GAME_OVER_MS, OFF_CLOCK_MS,
 } from '../worker/room-core.js';
 
@@ -107,6 +107,19 @@ describe('lobby: hello, names, seats', () => {
     const h = harness();
     h.hello('a', 'Mo', { shape: 2, hat: 'cap', emoji: '🐍' });
     assert.deepEqual(h.lobby('a').members[0].avatar, { shape: 2, hat: 'cap', emoji: '🐍' });
+  });
+
+  test('avatar emoji must be one short grapheme; other keys kept, size capped', () => {
+    for (const ok of ['🐍', '👩🏽‍🚀', '🏳️‍🌈', 'x']) assert.equal(cleanAvatar({ emoji: ok }).emoji, ok);
+    for (const bad of ['👑 host', 'HOSTY', '🐍🐍', '', ' ', 42, null, '\u{1F469}\u200d'.repeat(9)]) {
+      assert.deepEqual(cleanAvatar({ emoji: bad }), { emoji: '💀' }, JSON.stringify(bad));
+    }
+    assert.deepEqual(cleanAvatar({ hat: 'cap' }), { hat: 'cap', emoji: '💀' });
+    assert.deepEqual(cleanAvatar({ emoji: '🐺', parts: 'x'.repeat(400) }), { emoji: '💀' });
+    assert.deepEqual(cleanAvatar('🐺'), { emoji: '💀' });
+    const h = harness();
+    h.hello('a', 'Mo', { emoji: '👑 host' });
+    assert.deepEqual(h.lobby('a').members[0].avatar, { emoji: '💀' });
   });
 
   test('same token rejoins the same seat; name can change in the lobby', () => {
@@ -585,6 +598,15 @@ describe('reactions', () => {
     h.send('t0', { t: 'react', kind: 'tomato', target: other });
     assert.equal(h.last('t2', 'event').target, other);
     for (const k of REACTIONS) assert.equal(typeof k, 'string');
+  });
+  test('reaction events go only to seated players, not late joiners', () => {
+    const h = started({ humans: 3 });
+    h.hello('late', 'Late');
+    assert.equal(h.room.s.members.late.waiting, true);
+    h.send('t0', { t: 'react', kind: 'skull' });
+    assert.equal(h.msgs('t1', 'event').length, 1);
+    assert.equal(h.msgs('t0', 'event').length, 1, 'sender sees their own');
+    assert.equal(h.msgs('late', 'event').length, 0);
   });
 });
 
