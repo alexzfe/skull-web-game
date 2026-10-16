@@ -523,13 +523,15 @@ export function createUI(handlers) {
     }).join('')}</div>`;
   }
 
-  // `lastAction.auto` (multiplayer ⏱ moves) tags the first line that action added.
+  // `lastAction.auto` (multiplayer ⏱ moves) tags the first line that action added;
+  // a fresh page (refresh, rejoin) gets the whole log at once, so no tag there.
   function renderLog(state, lastAction) {
     if (state.log.length < logLen) { el.log.innerHTML = ''; logLen = 0; }
     if (state.log.length === logLen) return;
+    const tagFirst = logLen > 0 && lastAction?.auto;
     const frag = state.log.slice(logLen).map((line, k) => {
       const cls = /SKULL|loses|eliminated/.test(line) ? 'bad' : /wins/.test(line) ? 'good' : /Round \d+ begins/.test(line) ? 'round' : '';
-      const auto = k === 0 && lastAction?.auto ? '<span class="auto-tag" title="Out of time: automatic move">⏱</span> ' : '';
+      const auto = k === 0 && tagFirst ? '<span class="auto-tag" title="Out of time: automatic move">⏱</span> ' : '';
       return `<li class="${cls}">${auto}${esc(line)}</li>`;
     }).join('');
     el.log.insertAdjacentHTML('beforeend', frag);

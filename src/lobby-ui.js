@@ -51,7 +51,9 @@ export function createLobbyUI(h) {
     const inGame = lobby.phase === 'in-game';
     const parts = [];
 
-    if (status === 'reconnecting') parts.push(`<p class="lobby-note warn">${STATUS_TEXT.reconnecting}</p>`);
+    // Off the socket nothing we send would arrive, so the host buttons wait for it.
+    const offline = status !== 'open';
+    if (offline) parts.push(`<p class="lobby-note warn">${STATUS_TEXT.reconnecting}</p>`);
     if (lobby.lastWinner && !inGame) {
       const w = lobby.lastWinner;
       const you = me && !me.waiting && w.name === me.name;
@@ -123,6 +125,7 @@ export function createLobbyUI(h) {
       }
     }
     el.body.innerHTML = parts.join('');
+    if (offline) el.body.querySelectorAll('button').forEach(b => { b.disabled = true; });
   }
 
   return {
