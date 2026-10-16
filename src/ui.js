@@ -105,6 +105,7 @@ export function createUI(handlers) {
 
   let actions = [];           // legal actions offered to the human in the current render
   let bidValue = null;
+  let bidDecision = '';   // the decision bidValue belongs to
   let last = null;            // { state, view } of the last render
   let shown = new Map();      // pid -> { len, revealed } as last rendered (for animations)
   let logLen = 0;
@@ -230,6 +231,10 @@ export function createUI(handlers) {
     state = withGhost(state, view.ghost);
 
     const amounts = bidAmounts().map(x => x.a.amount);
+    // Each new decision starts the stepper at the lowest legal bid, so a value
+    // nudged on an earlier turn never carries over.
+    const decision = `${state.round}|${state.phase}|${state.currentPlayer}|${state.bid?.amount ?? 0}`;
+    if (decision !== bidDecision) { bidDecision = decision; bidValue = amounts[0] ?? null; }
     if (!amounts.includes(bidValue)) bidValue = amounts[0] ?? null;
 
     const revealTargets = new Map();

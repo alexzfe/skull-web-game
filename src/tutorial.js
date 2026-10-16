@@ -21,14 +21,16 @@ function markDone() {
   try { localStorage.setItem(TUTORIAL_DONE_KEY, '1'); } catch { /* storage unavailable */ }
 }
 
-export function createTutorialDirector({ script = TUTORIAL_SCRIPT } = {}) {
+// How long a bot move's animation (and banner) gets before Bones talks about it.
+const settleMs = a => (a.type === 'reveal' ? 1100 : a.type === 'bid' || a.type === 'pass' ? 950 : 750);
+
+export function createTutorialDirector({ script = TUTORIAL_SCRIPT, settle = settleMs } = {}) {
   let ctl = null;
   let i = -1;            // index of the current step
   let pending = [];      // bot actions of the current bots step not yet applied
   let alive = true;
   let gameOver = false;
   let draws = 0;
-  let acked = true;      // narrated bots step: has the player clicked Next yet?
   let holdDone = false;  // the last reveal hold has finished (it can end mid-bubble)
 
   const step = () => script[i];
@@ -42,29 +44,20 @@ export function createTutorialDirector({ script = TUTORIAL_SCRIPT } = {}) {
     if (s.do) {
       coach?.say({ text: s.say, mood: s.mood, target: s.target, lock: true });
     } else if (s.bots) {
+      // Step by step: the bot moves with the table in plain view, the animation
+      // settles, then Bones explains it and waits for Next (see narrate()).
       pending = s.bots.slice();
-      acked = !s.say;
-      // Narrated bot moves play out behind the bubble; the script only moves on
-      // once the player has read the line and clicked Next.
-      if (s.say) {
-        Promise.resolve(coach?.say({ text: s.say, mood: s.mood, target: s.target ?? null, next: true })).then(() => {
-          if (!alive || step() !== s) return;
-          acked = true;
-          if (!pending.length) advance();
-        });
-      } else {
-        coach?.hide();   // let the table be watched, undimmed, while the bots move
-      }
+      coach?.hide({ block: true });
       ctl.resume();
     } else if (s.hold) {
-      coach?.hide();
+      coach?.hide({ block: true });
       if (gameOver || holdDone) advance();
     } else if (s.nextRound) {
       coach?.hide();
       ctl.resume();
     } else if (s.finale) {
       ctl.setXray(false);
-      Promise.resolve(coach?.say({ text: s.say, mood: s.mood, buttons: s.buttons })).then(v => {
+      Promise.resolve(coach?.say({ text: s.say, mood: s.mood, buttons: s.buttons, block: true })).then(v => {
         if (!alive) return;
         markDone();
         if (v === 'replay') ctl.startTutorial();
@@ -72,10 +65,21 @@ export function createTutorialDirector({ script = TUTORIAL_SCRIPT } = {}) {
       });
     } else {
       ctl.setXray(!!s.xray);
-      Promise.resolve(coach?.say({ text: s.say, mood: s.mood, target: s.target ?? null, next: true })).then(() => {
+      Promise.resolve(coach?.say({ text: s.say, mood: s.mood, target: s.target ?? null, next: true, block: true })).then(() => {
         if (alive && step() === s) advance();
       });
     }
+  }
+
+  // All of this step's bot moves are on the table: let them settle, then talk.
+  function narrate(s, last) {
+    if (!s.say) { advance(); return; }
+    setTimeout(() => {
+      if (!alive || step() !== s) return;
+      Promise.resolve(ctl.coach?.say({ text: s.say, mood: s.mood, target: s.target ?? null, next: true, block: true })).then(() => {
+        if (alive && step() === s) advance();
+      });
+    }, settle(last));
   }
 
   function advance() {
@@ -96,10 +100,9 @@ export function createTutorialDirector({ script = TUTORIAL_SCRIPT } = {}) {
     rng: () => TUTORIAL_RNG_SEQUENCE[draws++ % TUTORIAL_RNG_SEQUENCE.length],
 
     autoNextRoundMs: 600,
-    // Bots move at a followable pace; narrated lines are Next-gated, so their
-    // pace no longer decides how long a line stays readable.
+    // A short beat before each scripted bot move, so the player sees who acts.
     botDelay(state) {
-      return state.phase === 'reveal' ? 1100 : 850;
+      return state.phase === 'reveal' ? 800 : 650;
     },
 
     botAction(state, id) {
@@ -115,9 +118,12 @@ export function createTutorialDirector({ script = TUTORIAL_SCRIPT } = {}) {
       return !!s.do && sameAction(s.do, action);
     },
 
+    // Bots only run while the current step still has scripted moves left. Once
+    // they're done (and Bones is talking about them), the table waits for Next:
+    // nothing ever falls through to the regular AI.
     canProceed() {
       const s = step();
-      return !!s && (!!s.bots || !!s.nextRound);
+      return !!s && ((!!s.bots && pending.length > 0) || !!s.nextRound);
     },
 
     onStart(c) {
@@ -144,8 +150,9 @@ export function createTutorialDirector({ script = TUTORIAL_SCRIPT } = {}) {
         advance();
       } else if (s.bots) {
         const k = pending.findIndex(a => sameAction(a, action));
-        if (k >= 0) pending.splice(k, 1);
-        if (!pending.length && acked) advance();
+        if (k < 0) return;
+        pending.splice(k, 1);
+        if (!pending.length) narrate(s, action);
       } else if (s.nextRound && action.type === 'nextRound') {
         advance();
       }

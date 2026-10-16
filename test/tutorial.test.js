@@ -5,7 +5,7 @@ import { createTutorialDirector, TUTORIAL_DONE_KEY } from '../src/tutorial.js';
 import { TUTORIAL_SCRIPT } from '../src/tutorial-script.js';
 
 const HUMAN = 0;
-const tick = () => new Promise(r => setImmediate(r));
+const tick = () => new Promise(r => setTimeout(r, 0));
 
 function fakeStorage() {
   const m = new Map();
@@ -19,9 +19,11 @@ function fakeStorage() {
 
 // Drives a tutorial director the way src/main.js does, with a fake coach that
 // clicks "Next" / the first button immediately and never resolves locked steps.
-async function replay({ finaleChoice = 'solo', skipAt = null } = {}) {
+// slowNext: the player takes a while to click Next (the case that once let the
+// regular AI play a scripted bot's move and froze the tutorial).
+async function replay({ finaleChoice = 'solo', skipAt = null, slowNext = false } = {}) {
   const store = fakeStorage();
-  const director = createTutorialDirector();
+  const director = createTutorialDirector({ settle: () => 0 });
   const says = [];
   const events = [];
   let skipFn = null;
@@ -32,7 +34,7 @@ async function replay({ finaleChoice = 'solo', skipAt = null } = {}) {
     say(opts) {
       says.push(opts);
       if (skipAt != null && says.length === skipAt) { queueMicrotask(() => skipFn()); return new Promise(() => {}); }
-      if (opts.next) return Promise.resolve();
+      if (opts.next) return slowNext ? new Promise(r => setTimeout(r, 8)) : Promise.resolve();
       if (opts.buttons) return Promise.resolve(finaleChoice);
       return new Promise(() => {});
     },
@@ -75,7 +77,7 @@ async function replay({ finaleChoice = 'solo', skipAt = null } = {}) {
   director.onStart(ctl);
   let rounds = 1;
   let humanSteps = 0;
-  for (let guard = 0; guard < 500 && !events.length; guard++) {
+  for (let guard = 0; guard < 5000 && !events.length; guard++) {
     await tick();
     if (events.length) break;
     const last = says[says.length - 1];
@@ -101,7 +103,8 @@ async function replay({ finaleChoice = 'solo', skipAt = null } = {}) {
     const bot = botToAct();
     assert.notEqual(bot, null, `a bot should act in phase ${state.phase}`);
     const action = director.botAction(state, bot);
-    assert.ok(action, `scripted move for bot ${bot} in phase ${state.phase}`);
+    // canProceed() is only true while a scripted move is pending — never a fallback to the AI
+    assert.ok(action, `scripted move for bot ${bot} in phase ${state.phase} (log: ${state.log.at(-1)})`);
     assert.ok(legalActions(state, bot).some(a => JSON.stringify(a) === JSON.stringify(action)), `legal: ${JSON.stringify(action)}`);
     perform(action);
   }
@@ -129,6 +132,24 @@ describe('tutorial script', () => {
     const p = r.state.players[1];
     assert.equal(p.hand.length + p.mat.length, 3);
     assert.ok(r.state.log.some(l => /Panthers flips You' card: SKULL/.test(l) || /Panthers flips .* SKULL/.test(l)));
+  });
+
+  test('a slow reader never lets the bots run ahead of the script', async () => {
+    const r = await replay({ slowNext: true });
+    assert.equal(r.state.phase, 'game-over');
+    assert.equal(r.state.winner, HUMAN);
+  });
+
+  test('every line is unique (QA tracks bubbles by their text)', () => {
+    const says = TUTORIAL_SCRIPT.filter(s => s.say).map(s => s.say);
+    assert.deepEqual(says.filter((t, k) => says.indexOf(t) !== k), []);
+  });
+
+  test('every bot step is a single narrated move with a target', () => {
+    for (const s of TUTORIAL_SCRIPT.filter(x => x.bots)) {
+      assert.equal(s.bots.length, 1, `one move per step: ${s.say}`);
+      assert.ok(s.say && s.target, `bot step needs text + target: ${JSON.stringify(s.bots)}`);
+    }
   });
 
   test('Replay tutorial restarts the tutorial', async () => {
@@ -164,9 +185,9 @@ describe('tutorial script', () => {
     }
   });
 
-  test('narrated bot steps wait for Next before moving on', async () => {
+  test('after a bot move, bots stay frozen until Next is clicked', async () => {
     fakeStorage();
-    const d = createTutorialDirector();
+    const d = createTutorialDirector({ settle: () => 0 });
     const { players, firstPlayer } = d.setup();
     let state = createGame({ players, firstPlayer });
     let release = null;
@@ -175,17 +196,22 @@ describe('tutorial script', () => {
       hide() {}, onSkip() {},
     };
     d.onStart({ coach, resume() {}, setXray() {}, getState: () => state });
-    await tick();
     const apply = a => { const prev = state; state = applyAction(state, a); d.onState(prev, state, a); };
-    for (const s of TUTORIAL_SCRIPT.slice(0, 5)) {
-      if (s.do) { apply(s.do); await tick(); }
-      if (s.bots) for (const a of s.bots) { apply(d.botAction(state, a.player)); await tick(); }
+    const settle = async () => { for (let k = 0; k < 5; k++) await tick(); };
+    await settle();
+    for (const s of TUTORIAL_SCRIPT.slice(1, 6)) {
+      if (s.do) apply(s.do);
+      if (s.bots) apply(d.botAction(state, s.bots[0].player));
+      await settle();
     }
-    // Panthers has bid; the narrated step must hold until Next is clicked.
-    assert.ok(release, 'narrated line was shown with a Next button');
+    // Panthers has bid and Bones is explaining it: it's Snakes' turn, but nothing moves.
+    assert.ok(release, 'the bid was narrated with a Next button');
+    assert.equal(state.currentPlayer, 2);
+    assert.equal(d.canProceed(), false);
     assert.equal(d.botAction(state, 2), null);
     release();
-    await tick();
+    await settle();
+    assert.equal(d.canProceed(), true);
     assert.deepEqual(d.botAction(state, 2), { type: 'pass', player: 2 });
     d.exit();
   });

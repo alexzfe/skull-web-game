@@ -117,6 +117,7 @@ const PAD = 6;     // spotlight padding around the target
 const GAP = 30;    // bubble distance from the target
 const EDGE = 8;    // min distance from the viewport edge
 const TIP_MIN_MS = 900;   // a tip ignores dismiss-clicks this long after it appears
+const TAP_GRACE_MS = 400; // a "Next" bubble ignores tap-to-continue this long after it appears
 const BLOCKED = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick', 'touchstart', 'touchend', 'contextmenu'];
 
 export function createCoach() {
@@ -151,12 +152,14 @@ export function createCoach() {
   let raf = 0;
   let skipFn = null;
   let placed = '';       // last applied layout, to avoid restyling every frame
+  let blockHidden = false; // see hide({ block })
   let lastFloat = null;  // last guide bubble spot beside a target (desktop)
   let lastDock = null;   // last guide dock edge (mobile)
 
   // ---------- public ----------
 
   function say(opts = {}) {
+    blockHidden = false;
     settle();
     clearTimeout(tipTimer);
     const o = {
@@ -206,7 +209,8 @@ export function createCoach() {
     });
   }
 
-  function hide() {
+  function hide({ block = false } = {}) {
+    blockHidden = !!block;
     settle();
     clearTimeout(tipTimer);
     cancelAnimationFrame(raf);
@@ -350,16 +354,25 @@ export function createCoach() {
     return targets().some(n => n.contains(node));
   }
 
+  // lock: dim + only the target. block: no dimming, but the table ignores input
+  // until the bubble is answered (tutorial Next bubbles).
+  // hide({ block: true }) keeps the table ignoring input with no bubble showing
+  // (tutorial bot moves play out untouched).
+  const guarding = () => blockHidden || (cur && cur.o.mode === 'guide' && (cur.o.lock || cur.o.block));
+
   function guard(e) {
-    if (!cur || cur.o.mode !== 'guide' || !cur.o.lock) return;
+    if (!guarding()) return;
     if (allowed(e.target)) return;
-    e.preventDefault();
+    // Under a tap-to-continue bubble, keep the browser's click alive (a cancelled
+    // touchstart never becomes a click) so tapToContinue can see it.
+    const tapBubble = cur && cur.o.next && !cur.o.buttons && !cur.o.lock;
+    if (!tapBubble) e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
   }
 
   function guardKeys(e) {
-    if (!cur || cur.o.mode !== 'guide' || !cur.o.lock) return;
+    if (!guarding()) return;
     if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
     if (allowed(e.target)) return;
     e.preventDefault();
@@ -375,6 +388,22 @@ export function createCoach() {
     hide();
   }
 
+  // A "Next" bubble also continues on a click anywhere on the screen. The bubble's
+  // own buttons, the top bar and open dialogs keep their usual meaning. A short
+  // grace period stops a fast double-click from skipping a line unread.
+  function tapToContinue(e) {
+    if (!cur || cur.o.mode !== 'guide' || !cur.o.next || cur.o.buttons || cur.o.lock) return;
+    if (e.target instanceof Element && e.target.closest('.coach-root button, .topbar, dialog[open]')) return;
+    if (performance.now() - cur.at < TAP_GRACE_MS) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    const { o } = cur;
+    settle(true);
+    if (cur?.o === o) hide();
+  }
+
+  window.addEventListener('click', tapToContinue, { capture: true, passive: false });
   BLOCKED.forEach(t => window.addEventListener(t, guard, { capture: true, passive: false }));
   window.addEventListener('keydown', guardKeys, true);
   window.addEventListener('keyup', guardKeys, true);
