@@ -3,7 +3,7 @@
 // lists Open rooms in the lobby.
 
 import { DurableObject } from 'cloudflare:workers';
-import { RoomCore } from './room-core.js';
+import { RoomCore, CLOSE } from './room-core.js';
 
 const CODE_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 const CODE_RE = /^[A-HJ-NP-Z]{4}$/;
@@ -44,12 +44,10 @@ export default {
     const m = path.match(/^\/api\/rooms\/([A-Za-z]{4})\/ws$/);
     if (m) {
       const code = m[1].toUpperCase();
-      const token = url.searchParams.get('token') ?? '';
       if (!CODE_RE.test(code)) return json({ error: 'No such room' }, 404);
-      if (!TOKEN_RE.test(token)) return json({ error: 'Bad token' }, 400);
-      if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
-        return json({ error: 'Expected a WebSocket' }, 426);
-      }
+      // The room decides: 404 when missing, even for a plain GET (the
+      // client's not-found probe), then the token and upgrade checks.
+      const token = url.searchParams.get('token') ?? '';
       return roomStub(env, code).fetch(`https://room/ws?token=${encodeURIComponent(token)}`, request);
     }
 
@@ -89,8 +87,13 @@ export class Room extends DurableObject {
       return new Response('ok');
     }
     if (url.pathname === '/ws') {
-      if (!this.core || this.core.dead) return new Response('No such room', { status: 404 });
-      const token = url.searchParams.get('token');
+      // Read-only until the upgrade: probing a missing code stores nothing.
+      if (!this.core || this.core.dead) return json({ error: 'No such room' }, 404);
+      const token = url.searchParams.get('token') ?? '';
+      if (!TOKEN_RE.test(token)) return json({ error: 'Bad token' }, 400);
+      if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
+        return json({ error: 'Expected a WebSocket' }, 426);
+      }
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair);
       // A second tab with the same token takes over the seat.
@@ -98,7 +101,7 @@ export class Room extends DurableObject {
       this.ctx.acceptWebSocket(server, [token]);
       server.serializeAttachment({ token });
       for (const ws of old) {
-        try { ws.close(4000, 'replaced'); } catch { /* already closed */ }
+        try { ws.close(CLOSE.replaced, 'replaced'); } catch { /* already closed */ }
       }
       return new Response(null, { status: 101, webSocket: client });
     }
@@ -143,7 +146,7 @@ export class Room extends DurableObject {
       const targets = o.to === 'all' ? sockets : this.ctx.getWebSockets(o.to);
       if (o.close) {
         for (const ws of targets) {
-          try { ws.close(4001, 'bye'); } catch { /* already closed */ }
+          try { ws.close(o.code ?? CLOSE.left, 'bye'); } catch { /* already closed */ }
         }
         continue;
       }
@@ -164,7 +167,7 @@ export class Room extends DurableObject {
     }
     if (core.dead) {
       for (const ws of this.ctx.getWebSockets()) {
-        try { ws.close(4002, 'room closed'); } catch { /* already closed */ }
+        try { ws.close(CLOSE.notFound, 'room closed'); } catch { /* already closed */ }
       }
       await this.ctx.storage.deleteAlarm();
       await this.ctx.storage.deleteAll();

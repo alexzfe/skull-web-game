@@ -3,7 +3,8 @@
 // Object feeds it events and delivers what it returns.
 //
 // Every public method returns outputs `[{to, msg}]` (`to` is a token or 'all')
-// and `[{to, close: true}]` for sockets the wrapper should close. Time comes
+// and `[{to, close: true, code}]` for sockets the wrapper should close (`code`
+// is a CLOSE value). Time comes
 // from the injected `now()`; `nextAlarm()` says when `tick()` is next due.
 // All room data lives in `this.s`, plain JSON, so the wrapper can persist it.
 
@@ -35,6 +36,9 @@ export const BOT_DELAY_MS = [700, 1200];
 export const DEFAULT_NAME = 'Rider';
 export const DEFAULT_AVATAR = { emoji: '💀' };
 const NAME_MAX = 16;
+
+// WebSocket close codes the client understands (src/net.js).
+export const CLOSE = { left: 1000, replaced: 4000, kicked: 4001, notFound: 4004, full: 4009 };
 
 export const ERR = {
   hello: 'Say hello first',
@@ -111,7 +115,7 @@ export class RoomCore {
 
   handle(token, msg) {
     return this.run(() => {
-      if (this.s.dead) return this.error(token, ERR.dead, true);
+      if (this.s.dead) return this.error(token, ERR.dead, CLOSE.notFound);
       if (!msg || typeof msg !== 'object' || typeof msg.t !== 'string') return this.error(token, ERR.bad);
       if (msg.t === 'hello') return this.hello(token, msg);
       const m = this.s.members[token];
@@ -196,13 +200,13 @@ export class RoomCore {
     this.out.push({ to, msg });
   }
 
-  close(to) {
-    this.out.push({ to, close: true });
+  close(to, code) {
+    this.out.push({ to, close: true, code });
   }
 
-  error(token, msg, close = false) {
+  error(token, msg, closeCode = null) {
     this.send(token, { t: 'error', msg });
-    if (close) this.close(token);
+    if (closeCode) this.close(token, closeCode);
   }
 
   humans() {
@@ -273,7 +277,7 @@ export class RoomCore {
     const s = this.s;
     if (s.kicked.includes(token)) {
       this.send(token, { t: 'kicked' });
-      return this.close(token);
+      return this.close(token, CLOSE.kicked);
     }
     let m = s.members[token];
     if (m) {
@@ -305,10 +309,10 @@ export class RoomCore {
         s.members[token] = m;
         if (!this.seatHuman(m)) {
           delete s.members[token];
-          return this.error(token, ERR.full, true);
+          return this.error(token, ERR.full, CLOSE.full);
         }
       } else {
-        if (this.tableCount() >= MAX_SEATS) return this.error(token, ERR.full, true);
+        if (this.tableCount() >= MAX_SEATS) return this.error(token, ERR.full, CLOSE.full);
         m.waiting = true;
         s.members[token] = m;
       }
@@ -329,7 +333,7 @@ export class RoomCore {
     const seat = this.inGame(m) ? m.seat : null;
     this.removeMember(m.token);
     if (seat != null) this.forfeitSeat(seat);
-    this.close(m.token);
+    this.close(m.token, CLOSE.left);
     this.broadcastLobby();
     if (this.s.game) this.broadcastViews();
   }
@@ -408,7 +412,7 @@ export class RoomCore {
         if (!s.members[t].isBot) {
           s.kicked.push(t);
           this.send(t, { t: 'kicked' });
-          this.close(t);
+          this.close(t, CLOSE.kicked);
         }
         this.removeMember(t);
         break;
@@ -579,7 +583,7 @@ export class RoomCore {
     if (s.cleanupAt != null && s.cleanupAt <= now) {
       s.dead = true;
       s.game = null;
-      this.close('all');
+      this.close('all', CLOSE.notFound);
       return false;
     }
     const gone = this.humans().find(m => !m.connected && now - m.discSince + m.discTotal >= ABANDON_MS);

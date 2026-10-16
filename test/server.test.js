@@ -2,7 +2,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { ROSE, SKULL, createGame, applyAction, legalActions } from '../src/engine.js';
 import {
-  RoomCore, actors, autoAction, BOTS, REACTIONS, ERR,
+  RoomCore, actors, autoAction, BOTS, REACTIONS, ERR, CLOSE,
   ABANDON_MS, CLEANUP_MS, NEXT_ROUND_MS, GAME_OVER_MS, OFF_CLOCK_MS,
 } from '../worker/room-core.js';
 
@@ -20,11 +20,13 @@ function seeded(seed) {
 
 // A room with fake time and fake sockets. `inbox[token]` collects messages.
 function harness(seed = 1) {
-  const h = { t: 1_000_000, inbox: {}, open: new Set() };
+  const h = { t: 1_000_000, inbox: {}, open: new Set(), closed: {} };
   h.room = new RoomCore({ code: 'KXPQ', now: () => h.t, rng: seeded(seed) });
   h.deliver = out => {
     for (const o of out) {
       if (o.close) {
+        assert.ok(Object.values(CLOSE).includes(o.code), `close code ${o.code}`);
+        for (const tk of o.to === 'all' ? [...h.open] : [o.to]) h.closed[tk] = o.code;
         if (o.to === 'all') h.open.clear(); else h.open.delete(o.to);
         continue;
       }
@@ -623,5 +625,68 @@ describe('room lifecycle', () => {
     h.room = copy;
     for (let i = 0; i < 2000 && h.room.s.phase === 'in-game'; i++) h.wait(1000);
     assert.equal(h.lobby('t0').phase, 'waiting');
+  });
+});
+
+describe('client requests (NOTES.md, net agent)', () => {
+  test('serverNow is on every message type, including error and kicked', () => {
+    const h = started({ humans: 3 });
+    h.hello('k', 'Late');
+    h.send('t0', { t: 'react', kind: 'skull' });
+    h.act('t1', { type: 'bid', amount: 99 });
+    const all = Object.values(h.inbox).flat();
+    for (const t of ['lobby', 'view', 'event', 'error']) {
+      const ms = all.filter(m => m.t === t);
+      assert.ok(ms.length > 0, `saw ${t}`);
+      for (const m of ms) assert.equal(m.serverNow, h.t, `${t} has serverNow`);
+    }
+    const k = harness();
+    k.hello('a', 'Mo');
+    k.hello('b', 'Jo');
+    k.lobbyOp('a', 'kick', { seat: 1 });
+    assert.equal(typeof k.last('b', 'kicked').serverNow, 'number');
+  });
+
+  test('close codes: kicked 4001, full 4009, left 1000, room closed 4004', () => {
+    const h = harness();
+    h.hello('a', 'Mo');
+    h.hello('b', 'Jo');
+    h.lobbyOp('a', 'kick', { seat: 1 });
+    assert.equal(h.closed.b, CLOSE.kicked);
+    for (const tk of ['c', 'd', 'e', 'f', 'g']) h.hello(tk, tk);
+    h.hello('x', 'x');
+    assert.match(h.last('x', 'error').msg, /full/i);
+    assert.equal(h.closed.x, CLOSE.full);
+    h.send('c', { t: 'leave' });
+    assert.equal(h.closed.c, CLOSE.left);
+    for (const tk of ['a', 'd', 'e', 'f', 'g']) h.drop(tk);
+    h.wait(CLEANUP_MS);
+    assert.equal(h.room.dead, true);
+    h.hello('a', 'Mo');
+    assert.equal(h.closed.a, CLOSE.notFound);
+  });
+
+  test('seq is monotonic for the room lifetime: across rematches and a persist/restore', () => {
+    const h = started({ humans: 2, bots: 1, timer: 20, seed: 4 });
+    const seen = [];
+    const record = () => { for (const v of h.msgs('t0', 'view')) seen.push(v.seq); h.inbox.t0 = []; };
+    for (let game = 0; game < 2; game++) {
+      for (let i = 0; i < 3000 && h.room.s.phase === 'in-game'; i++) {
+        h.wait(1000);
+        if (i === 50) {
+          // Hibernation/eviction: the DO rebuilds the core from its stored JSON.
+          record();
+          h.room = RoomCore.fromJSON(JSON.parse(JSON.stringify(h.room.toJSON())), { now: () => h.t, rng: seeded(game) });
+          h.drop('t0');
+          h.hello('t0', 'H0');
+        }
+      }
+      record();
+      assert.equal(h.room.s.phase, 'waiting');
+      h.lobbyOp('t0', 'rematch');
+    }
+    record();
+    assert.ok(seen.length > 20);
+    for (let i = 1; i < seen.length; i++) assert.ok(seen[i] > seen[i - 1], `seq ${seen[i]} after ${seen[i - 1]}`);
   });
 });
