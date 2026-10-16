@@ -114,7 +114,7 @@ export function bonesSVG({ mood = 'neutral', crop = null } = {}) {
 
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const PAD = 6;     // spotlight padding around the target
-const GAP = 16;    // bubble distance from the target
+const GAP = 30;    // bubble distance from the target
 const EDGE = 8;    // min distance from the viewport edge
 const TIP_MIN_MS = 900;   // a tip ignores dismiss-clicks this long after it appears
 const BLOCKED = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick', 'touchstart', 'touchend', 'contextmenu'];
@@ -151,6 +151,8 @@ export function createCoach() {
   let raf = 0;
   let skipFn = null;
   let placed = '';       // last applied layout, to avoid restyling every frame
+  let lastFloat = null;  // last guide bubble spot beside a target (desktop)
+  let lastDock = null;   // last guide dock edge (mobile)
 
   // ---------- public ----------
 
@@ -299,15 +301,24 @@ export function createCoach() {
     placed = sig;
 
     let dock;
-    // Untargeted guide lines sit low, so the table (and its x-ray) stays readable.
-    if (mobile) dock = t ? (t.r.top + t.r.height / 2 < H / 2 ? 'bottom' : 'top') : 'bottom';
-    else if (!t) dock = tip ? 'corner' : 'low';
+    // Untargeted guide lines stay where the last bubble was, so Bones doesn't
+    // hop to the bottom of the screen and back between steps.
+    const stay = !t && !tip && (mobile ? lastDock : lastFloat);
+    if (mobile) dock = t ? (t.r.top + t.r.height / 2 < H / 2 ? 'bottom' : 'top') : (stay ? lastDock : 'bottom');
+    else if (!t) dock = tip ? 'corner' : (stay ? 'float' : 'low');
     else dock = 'float';
+    if (mobile && !tip) lastDock = dock;
     box.dataset.dock = dock;
     box.classList.toggle('small', mobile || tip);
 
     box.style.bottom = handTop != null && handTop - box.offsetHeight > 64 ? `${H - handTop + 6}px` : '';
     if (dock !== 'float') { box.style.left = box.style.top = ''; return; }
+    if (!t) {
+      const w = box.offsetWidth, h = box.offsetHeight;
+      box.style.left = `${Math.round(Math.max(EDGE, Math.min(W - w - EDGE, lastFloat.x)))}px`;
+      box.style.top = `${Math.round(Math.max(EDGE, Math.min(H - h - EDGE, lastFloat.y)))}px`;
+      return;
+    }
 
     const { r } = t;
     const w = box.offsetWidth, h = box.offsetHeight;
@@ -329,6 +340,7 @@ export function createCoach() {
       || (H - r.bottom > r.top ? { x: cx, y: clampY(r.bottom + GAP) } : { x: cx, y: clampY(r.top - GAP - h) });
     box.style.left = `${Math.round(pick.x)}px`;
     box.style.top = `${Math.round(pick.y)}px`;
+    if (!tip) lastFloat = { x: pick.x, y: pick.y };
   }
 
   // Guide-mode lock: only the target(s) and the bubble take input.

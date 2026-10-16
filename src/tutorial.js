@@ -17,9 +17,6 @@ function rememberedName() {
   } catch { return null; }
 }
 
-// Time to read a bubble before the table moves on.
-export const readMs = html => 900 + 22 * html.replace(/<[^>]+>/g, '').length;
-
 function markDone() {
   try { localStorage.setItem(TUTORIAL_DONE_KEY, '1'); } catch { /* storage unavailable */ }
 }
@@ -31,6 +28,8 @@ export function createTutorialDirector({ script = TUTORIAL_SCRIPT } = {}) {
   let alive = true;
   let gameOver = false;
   let draws = 0;
+  let acked = true;      // narrated bots step: has the player clicked Next yet?
+  let holdDone = false;  // the last reveal hold has finished (it can end mid-bubble)
 
   const step = () => script[i];
 
@@ -44,10 +43,22 @@ export function createTutorialDirector({ script = TUTORIAL_SCRIPT } = {}) {
       coach?.say({ text: s.say, mood: s.mood, target: s.target, lock: true });
     } else if (s.bots) {
       pending = s.bots.slice();
-      if (s.say) coach?.say({ text: s.say, mood: s.mood, target: s.target ?? null });
+      acked = !s.say;
+      // Narrated bot moves play out behind the bubble; the script only moves on
+      // once the player has read the line and clicked Next.
+      if (s.say) {
+        Promise.resolve(coach?.say({ text: s.say, mood: s.mood, target: s.target ?? null, next: true })).then(() => {
+          if (!alive || step() !== s) return;
+          acked = true;
+          if (!pending.length) advance();
+        });
+      } else {
+        coach?.hide();   // let the table be watched, undimmed, while the bots move
+      }
       ctl.resume();
     } else if (s.hold) {
-      if (gameOver) advance();
+      coach?.hide();
+      if (gameOver || holdDone) advance();
     } else if (s.nextRound) {
       coach?.hide();
       ctl.resume();
@@ -84,14 +95,11 @@ export function createTutorialDirector({ script = TUTORIAL_SCRIPT } = {}) {
     // Deterministic draws for the engine (Panthers' random card loss).
     rng: () => TUTORIAL_RNG_SEQUENCE[draws++ % TUTORIAL_RNG_SEQUENCE.length],
 
-    autoNextRoundMs: 400,
-    // Near-instant bots, except the first move of a step Bones narrates:
-    // that line stays up long enough to read before the next bubble replaces it.
+    autoNextRoundMs: 600,
+    // Bots move at a followable pace; narrated lines are Next-gated, so their
+    // pace no longer decides how long a line stays readable.
     botDelay(state) {
-      const s = step();
-      const quick = state.phase === 'reveal' ? 650 : 420;
-      if (s?.bots && s.say && pending.length === s.bots.length) return Math.max(quick, readMs(s.say));
-      return quick;
+      return state.phase === 'reveal' ? 1100 : 850;
     },
 
     botAction(state, id) {
@@ -127,15 +135,17 @@ export function createTutorialDirector({ script = TUTORIAL_SCRIPT } = {}) {
       const s = step();
       if (!s) return;
       if (!action) {
+        holdDone = true;
         if (s.hold) advance();
         return;
       }
+      holdDone = false;
       if (s.do && sameAction(s.do, action)) {
         advance();
       } else if (s.bots) {
         const k = pending.findIndex(a => sameAction(a, action));
         if (k >= 0) pending.splice(k, 1);
-        if (!pending.length) advance();
+        if (!pending.length && acked) advance();
       } else if (s.nextRound && action.type === 'nextRound') {
         advance();
       }

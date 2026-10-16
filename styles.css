@@ -565,13 +565,13 @@ body:has(.coach-root.lock:not([hidden])) .banner-layer { opacity: .18; }
 
 /* ============ Bones, the coach ============ */
 .coach-root { position: fixed; inset: 0; z-index: 80; pointer-events: none; transition: background .25s; }
-.coach-root.dim-all { background: rgba(5,3,3,.62); }
+.coach-root.dim-all { background: rgba(5,3,3,.32); }
 .coach-spot {
   position: fixed; border-radius: 18px; pointer-events: none;
   box-shadow: 0 0 0 2px var(--neon2), 0 0 24px 4px rgba(45,226,255,.5);
 }
-.coach-root.soft .coach-spot { box-shadow: 0 0 0 2px var(--neon2), 0 0 24px 4px rgba(45,226,255,.5), 0 0 0 200vmax rgba(5,3,3,.3); }
-.coach-root.lock .coach-spot { box-shadow: 0 0 0 2px var(--neon2), 0 0 24px 4px rgba(45,226,255,.5), 0 0 0 200vmax rgba(5,3,3,.62); }
+.coach-root.soft .coach-spot { box-shadow: 0 0 0 2px var(--neon2), 0 0 24px 4px rgba(45,226,255,.5), 0 0 0 200vmax rgba(5,3,3,.14); }
+.coach-root.lock .coach-spot { box-shadow: 0 0 0 2px var(--neon2), 0 0 24px 4px rgba(45,226,255,.5), 0 0 0 200vmax rgba(5,3,3,.34); }
 .coach-spot::after {
   content: ''; position: absolute; inset: -6px; border-radius: 22px;
   border: 2px solid var(--neon2); opacity: 0; animation: spot-ping 1.6s ease-out infinite;
@@ -692,4 +692,9 @@ body:has(.coach-root.lock:not([hidden])) .banner-layer { opacity: .18; }
   .coach-actions .btn { min-height: 38px; padding: 4px 14px; font-size: 14px; }
   .auto-hint { display: none; }
   .coach-link.coach-skip { top: calc(12px + env(safe-area-inset-top)); right: 100px; padding: 5px 10px; font-size: 11px; letter-spacing: .1em; }
+}
+
+/* Touch screens keep :hover after a tap; lifts would leave buttons/cards jumping under the finger. */
+@media (hover: none) {
+  .btn:hover, .card.playable:hover, .card.discardable:hover, .seat.target:hover { transform: none; }
 }

@@ -164,25 +164,29 @@ describe('tutorial script', () => {
     }
   });
 
-  test('narrated bot steps wait long enough to read the line', async () => {
+  test('narrated bot steps wait for Next before moving on', async () => {
     fakeStorage();
     const d = createTutorialDirector();
     const { players, firstPlayer } = d.setup();
     let state = createGame({ players, firstPlayer });
-    const coach = { say: o => (o.next ? Promise.resolve() : new Promise(() => {})), hide() {}, onSkip() {} };
+    let release = null;
+    const coach = {
+      say: o => (o.next ? new Promise(r => { if (/Panthers bets/.test(o.text)) release = r; else r(); }) : Promise.resolve()),
+      hide() {}, onSkip() {},
+    };
     d.onStart({ coach, resume() {}, setXray() {}, getState: () => state });
     await tick();
-    const delays = [];
+    const apply = a => { const prev = state; state = applyAction(state, a); d.onState(prev, state, a); };
     for (const s of TUTORIAL_SCRIPT.slice(0, 5)) {
-      if (s.do) { const prev = state; state = applyAction(state, s.do); d.onState(prev, state, s.do); await tick(); }
-      if (s.bots) for (const a of s.bots) {
-        delays.push([!!s.say, d.botDelay(state, a.player)]);
-        const prev = state; state = applyAction(state, d.botAction(state, a.player)); d.onState(prev, state, a); await tick();
-      }
+      if (s.do) { apply(s.do); await tick(); }
+      if (s.bots) for (const a of s.bots) { apply(d.botAction(state, a.player)); await tick(); }
     }
-    // step 5 ("Panthers bets...") is narrated; the place-initial bots step isn't
-    assert.ok(delays.some(([said, ms]) => said && ms >= 1500), JSON.stringify(delays));
-    assert.ok(delays.filter(([said]) => !said).every(([, ms]) => ms < 800), JSON.stringify(delays));
+    // Panthers has bid; the narrated step must hold until Next is clicked.
+    assert.ok(release, 'narrated line was shown with a Next button');
+    assert.equal(d.botAction(state, 2), null);
+    release();
+    await tick();
+    assert.deepEqual(d.botAction(state, 2), { type: 'pass', player: 2 });
     d.exit();
   });
 
