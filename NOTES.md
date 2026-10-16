@@ -391,6 +391,37 @@ In MP there's no game-over banner or modal. For 4s the table shows the last chal
 - **C1** and the forfeit clearing the mat are documented server choices under "Server agent → Behaviour choices", so they aren't findings.
 - **A1, A2, A3, A5, A7, A8, A9** are new. QA's "no horizontal scroll at 390px" still holds; A1 is about vertical fold, which they didn't check.
 
+### Regression after the MP fix batch (MP-QA2, 2026-10-16, master 7b614c7)
+
+**Suites (run one at a time):**
+- `node --test test/`: **157/157**.
+- Solo/tutorial `npm run e2e` against `npx serve -l 5173 .`: **ALL 97 RUNS PASSED**, including skip-at-every-step 82/82.
+- `npm run mp-e2e`: **PASS** in 83s. `node mp-e2e.mjs --swap`: **PASS** in 81s. No card leaks, console errors, horizontal scroll or stray ⏱ moves. Late joiner, reactions and tomato still pass after the reactions-to-seated-only change.
+- No `qa/` script changes were needed. The kick confirm, compact layout and toast suppression don't touch any flow mp-e2e drives, and no check was loosened.
+
+**Audit findings, re-verified in the browser** on `npm run dev -- --port 8795` with Playwright (mobile + touch, 390x844 and 360x740, host + 5 bots, 20s timer, two full games per size). Screenshots: `qa/shots/audit-qa2-*.png`.
+
+| Finding | Status | Evidence |
+|---|---|---|
+| A1 cards/buttons below the fold at 5–6 seats | **fixed** | `#game.crowded`; first action button at 617–706 and `#hand` at 590–712. 390x844: document 844 tall, no scroll. 360x740: document 797 tall; only the Road log is below the fold. Your controls were fully in view on every one of your moves: 7/7 at 390, 10/10 at 360. No horizontal scroll. (`audit-qa2-six-start-*.png`, `audit-qa2-six-my-move-*.png`) |
+| A2 kick is one tap + permanent | **fixed (confirm); ban kept by design** | ✕ opens "Kick Gus? They can't rejoin this table." **Keep** leaves Gus seated. **Kick** removes him, and the guest, who joined by link, lands on home with "The host kicked you from the table." instead of a dead lobby. Removing a bot is still one tap. (`audit-qa2-kick-confirm.png`, `audit-qa2-kicked-guest.png`) |
+| A3 game-over moment underplayed | **fixed** | `#mp-winner` fades in over the last challenge banner (z 60 vs 10): crowned avatar, "Snakes wins the game!", "Back to the lobby in a moment…". It stays ~2.3s until the lobby returns (3.2s after the last flip). Seen in 3 games. (`audit-qa2-winner.png`) |
+| A4 📡 note behind "Open somewhere else" | **fixed** | Replaced dialog open; no "Reconnecting" text in the lobby behind it (`audit-qa2-replaced.png`) |
+| A5 avatar can be any text | **fixed** | A raw client's `emoji:'HOST👑LONGTEXT'` came back as `💀`, with other keys (`shape`) passed through. A real single emoji (`👑`) is kept. (`audit-qa2-lobby-avatars.png`) |
+| A6 ⏱ toast over the mobile status line | **fixed** | 0 non-error toasts while `#game.my-move`, across both sizes and all games. Your own ⏱ move (idled to the 20s timeout once per size) made no toast; the log shows "⏱ Alex passes." / "⏱ Alex places a card." (`audit-qa2-after-own-auto-*.png`) |
+| A7 late joiners get reactions | fixed per server test (not re-driven in a browser) | new `test/server.test.js` case; mp-e2e reactions still reach every seated client |
+| A8 duplicate frame on Leave | not addressed (info only) | — |
+| A9 solo subtitle under the wrong button | **fixed** | `#play-now` top 481 → `#play-sub` 547 → `#learn` 582 (`audit-qa2-home.png`) |
+
+**Solo and tutorial still look right:**
+- Solo with 5 opponents gets the same compact layout at 390x844 and 360x740. Controls were in view on 4/4 of your moves at each size, with no horizontal scroll (`audit-qa2-solo5-*.png`).
+- The tutorial (2 opponents) is not `crowded` and keeps its old layout. The coach bubble docks at the bottom above the hand, and nothing auto-scrolls (`audit-qa2-tutorial-1.png`, `audit-qa2-tutorial-5.png`).
+- No console or page errors in any context.
+
+**New findings:**
+- **B1. "X left the table" can be lost on phones (low, owner: shell, found by code reading).** While it's your move, `ui.toast` now drops every non-`bad` toast instead of holding it back. `noteSeatChanges` toasts "X left the table" without a kind, so if a player leaves during your move in MP on a phone, that notice never shows. The greyed "X left" seat still tells the story. Suggestion: queue non-error toasts until your move ends, or give "left" its own kind that isn't dropped.
+- **B2. Info: the winner overlay comes up during the final-flip hold.** It appears 0.9s after the game-over view, while the 2s final-flip hold is still on. For about half a second the status line under the overlay still reads "Reveal · Flipping…", and the faded board keeps the "wins the challenge" pill. Both are mostly hidden by the overlay; cosmetic only.
+
 ## MP fix batch (2026-10-16)
 
 Fixes for the Final regression's two new lows and audit A1–A5, A7 and A9. `node --test test/`: 157/157 (2 new server tests). Checked with Playwright on `npm run dev -- --port 8796` (390x844, 360x740, 1280x800). I didn't run `qa/e2e.mjs` or `qa/mp-e2e.mjs`; QA reruns them.
