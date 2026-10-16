@@ -1,0 +1,10 @@
+{
+  "name": "skull-web-game",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node --test test/",
+    "start": "npx --yes serve -l 5173 ."
+  }
+}

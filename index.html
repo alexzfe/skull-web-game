@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0d0a09">
+  <title>Skull &amp; Roses</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%23140d0b' stroke='%23ff2d6f' stroke-width='3'/%3E%3Cpath d='M32 12c-11 0-16 8-16 16 0 6 3 9 7 10v6h18v-6c4-1 7-4 7-10 0-8-5-16-16-16z' fill='%23efe3cf'/%3E%3Cellipse cx='25.5' cy='29' rx='4' ry='4.5' fill='%23140d0b'/%3E%3Cellipse cx='38.5' cy='29' rx='4' ry='4.5' fill='%23140d0b'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;700&family=Rye&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="src/main.js"></script>
+</head>
+<body>
+  <!-- SVG sprite: card art referenced via <use href="#..."> -->
+  <svg class="sprite" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <radialGradient id="g-rose-card" cx="50%" cy="42%" r="70%">
+        <stop offset="0" stop-color="#4a0f1d"/>
+        <stop offset="1" stop-color="#14050a"/>
+      </radialGradient>
+      <radialGradient id="g-skull-card" cx="50%" cy="42%" r="70%">
+        <stop offset="0" stop-color="#2d2a33"/>
+        <stop offset="1" stop-color="#09080b"/>
+      </radialGradient>
+      <linearGradient id="g-bone" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#fbf4e4"/>
+        <stop offset="1" stop-color="#c9bc9f"/>
+      </linearGradient>
+      <radialGradient id="g-petal" cx="50%" cy="35%" r="70%">
+        <stop offset="0" stop-color="#ff4d6a"/>
+        <stop offset=".6" stop-color="#c3102f"/>
+        <stop offset="1" stop-color="#6d0618"/>
+      </radialGradient>
+      <radialGradient id="g-mat-skull" cx="50%" cy="40%" r="65%">
+        <stop offset="0" stop-color="#3a2e2a"/>
+        <stop offset=".75" stop-color="#1a1210"/>
+        <stop offset="1" stop-color="#0c0807"/>
+      </radialGradient>
+      <radialGradient id="g-mat-rose" cx="50%" cy="40%" r="65%">
+        <stop offset="0" stop-color="#8a1530"/>
+        <stop offset=".75" stop-color="#4a0816"/>
+        <stop offset="1" stop-color="#22030a"/>
+      </radialGradient>
+      <pattern id="p-leather" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+        <rect width="6" height="6" fill="#1d1513"/>
+        <line x1="0" y1="0" x2="0" y2="6" stroke="#ffffff" stroke-opacity=".05" stroke-width="2"/>
+      </pattern>
+
+      <g id="bone">
+        <rect x="-28" y="-3.2" width="56" height="6.4" rx="3.2"/>
+        <circle cx="-29" cy="-3.6" r="4.6"/><circle cx="-29" cy="3.6" r="4.6"/>
+        <circle cx="29" cy="-3.6" r="4.6"/><circle cx="29" cy="3.6" r="4.6"/>
+      </g>
+
+      <symbol id="sym-skull" viewBox="-42 -38 84 80">
+        <g fill="#d9cdb2" stroke="#2b2420" stroke-width="1.2">
+          <use href="#bone" transform="translate(0 20) rotate(32)"/>
+          <use href="#bone" transform="translate(0 20) rotate(-32)"/>
+        </g>
+        <path d="M0-31C-19-31-27-17-27-3c0 11 5 17 11 19l1 9c0 3 3 5 6 5h18c3 0 6-2 6-5l1-9c6-2 11-8 11-19 0-14-8-28-27-28z" fill="url(#g-bone)" stroke="#2b2420" stroke-width="1.6"/>
+        <path d="M-17-2c0-7 12-8 13-1 1 7-4 11-8 10-4-1-5-4-5-9z" fill="#120d0b"/>
+        <path d="M17-2c0-7-12-8-13-1-1 7 4 11 8 10 4-1 5-4 5-9z" fill="#120d0b"/>
+        <circle cx="-10" cy="1.5" r="1.9" fill="#ff2d55"/>
+        <circle cx="10" cy="1.5" r="1.9" fill="#ff2d55"/>
+        <path d="M0 8l-4 7h8z" fill="#120d0b"/>
+        <path d="M-9 20v9M-3 21v9M3 21v9M9 20v9M-12 23.5h24" stroke="#3a302a" stroke-width="1.3" fill="none"/>
+        <path d="M-20-16c4-6 9-8 14-9" stroke="#fff" stroke-opacity=".55" stroke-width="2" fill="none" stroke-linecap="round"/>
+      </symbol>
+
+      <symbol id="sym-skull-mono" viewBox="-32 -34 64 68">
+        <path d="M0-31C-19-31-27-17-27-3c0 11 5 17 11 19l1 9c0 3 3 5 6 5h18c3 0 6-2 6-5l1-9c6-2 11-8 11-19 0-14-8-28-27-28z" fill="currentColor"/>
+        <path d="M-17-2c0-7 12-8 13-1 1 7-4 11-8 10-4-1-5-4-5-9zM17-2c0-7-12-8-13-1-1 7 4 11 8 10 4-1 5-4 5-9zM0 8l-4 7h8z" fill="#140d0b"/>
+        <path d="M-9 20v9M-3 21v9M3 21v9M9 20v9" stroke="#140d0b" stroke-width="1.6"/>
+      </symbol>
+
+      <symbol id="sym-rose" viewBox="-40 -40 80 90">
+        <path d="M0 12C3 24-3 33 1 48" stroke="#2f7d3a" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+        <path d="M2 27c8-9 19-8 22-4-6 7-14 8-22 4z" fill="#3fa04b"/>
+        <path d="M0 36c-9-7-18-6-21-2 6 6 14 6 21 2z" fill="#348a40"/>
+        <path d="M3 20l4-2M-2 42l-4-1" stroke="#2f7d3a" stroke-width="2" stroke-linecap="round"/>
+        <path d="M-25-8c-2-20 14-29 25-26 11-3 27 6 25 26-2 16-14 24-25 24s-23-8-25-24z" fill="url(#g-petal)" stroke="#4a0412" stroke-width="1.2"/>
+        <path d="M-18-10c-1-14 11-19 18-17 7-2 19 4 18 17-2 12-10 17-18 17s-17-5-18-17z" fill="#c8102e" stroke="#5c0516" stroke-width="1"/>
+        <path d="M-9-12c0-8 12-10 15-3 2 5-3 9-7 7-3-1-3-5 0-5" stroke="#ff8fa0" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+        <path d="M-13-2c5 7 21 7 26 0" stroke="#7a0a1c" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+        <path d="M-24-6c5 15 43 15 48 0" stroke="#7a0a1c" stroke-width="1.4" fill="none"/>
+        <path d="M-15-22c3-4 8-6 12-6" stroke="#fff" stroke-opacity=".45" stroke-width="2" fill="none" stroke-linecap="round"/>
+      </symbol>
+    </defs>
+  </svg>
+
+  <!-- ===== Setup screen ===== -->
+  <section id="setup" class="screen">
+    <div class="setup-card">
+      <h1 class="logo">
+        <span class="logo-skull">Skull</span>
+        <span class="logo-amp">&amp;</span>
+        <span class="logo-roses">Roses</span>
+      </h1>
+      <p class="tagline">A game of bluff at the bar. Bet big, flip roses, dodge skulls.</p>
+      <div class="setup-art" aria-hidden="true">
+        <div class="card up tilt-l"><div class="card-inner"><div class="card-side card-front" data-face="rose"></div></div></div>
+        <div class="card up tilt-r"><div class="card-inner"><div class="card-side card-front" data-face="skull"></div></div></div>
+      </div>
+      <form id="setup-form" autocomplete="off">
+        <div class="cta">
+          <button id="play-now" class="btn primary big play-now" type="submit">Play now</button>
+          <button id="learn" class="btn learn" type="button" data-cmd="learn">
+            <span class="learn-bones" data-bones="grin" aria-hidden="true"></span>
+            <span class="learn-text">Learn to play <small>60s</small></span>
+          </button>
+        </div>
+        <p id="play-sub" class="play-sub">vs 3 rival gangs · riding as Rider</p>
+        <details id="table-settings" class="table-settings">
+          <summary>Table settings</summary>
+          <div class="settings-body">
+            <label class="field">
+              <span>Your road name <small>(optional)</small></span>
+              <input id="player-name" name="name" maxlength="16" placeholder="Rider">
+            </label>
+            <fieldset class="field">
+              <legend>Rival gangs at the table</legend>
+              <div class="seg" role="radiogroup">
+                <label><input type="radio" name="opponents" value="2"><span>2</span></label>
+                <label><input type="radio" name="opponents" value="3" checked><span>3</span></label>
+                <label><input type="radio" name="opponents" value="4"><span>4</span></label>
+                <label><input type="radio" name="opponents" value="5"><span>5</span></label>
+              </div>
+            </fieldset>
+          </div>
+        </details>
+        <button class="btn ghost rules-link" type="button" data-cmd="rules">Rules cheat sheet</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- ===== Game screen ===== -->
+  <section id="game" class="screen" hidden>
+    <header class="topbar">
+      <div class="brand"><span class="logo-skull">Skull</span> <span class="logo-amp">&amp;</span> <span class="logo-roses">Roses</span></div>
+      <div id="status" class="status" data-tut="status" aria-live="polite"></div>
+      <div class="top-actions">
+        <button class="icon-btn" data-cmd="rules" title="Rules" aria-label="Rules">?</button>
+        <button class="icon-btn" data-cmd="new-game" title="New game" aria-label="New game"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <main class="table-wrap">
+        <div class="table">
+          <div id="opponents" class="opponents"></div>
+          <div id="center" class="center"></div>
+          <div id="banner-layer" class="banner-layer" aria-live="assertive"></div>
+        </div>
+        <div class="player-zone">
+          <div id="me-seat" class="me-seat"></div>
+          <div class="me-right">
+            <div id="controls" class="controls"></div>
+            <div id="hand" class="hand"></div>
+          </div>
+        </div>
+      </main>
+      <aside class="log-panel">
+        <details id="log-details" open>
+          <summary>Road log</summary>
+          <ol id="log-list" class="log-list"></ol>
+        </details>
+      </aside>
+    </div>
+    <div id="toasts" class="toasts" aria-live="polite"></div>
+  </section>
+
+  <!-- ===== Rules ===== -->
+  <dialog id="rules" class="modal">
+    <form method="dialog" class="modal-body">
+      <h2>How to play</h2>
+      <p class="lead">Each rider holds <b>3 Roses</b> and <b>1 Skull</b>. Win <b>two challenges</b> — or be the last rider holding cards.</p>
+      <ol class="rules-list">
+        <li><b>Lay down.</b> Everyone puts one card face-down on their mat.</li>
+        <li><b>Stack or challenge.</b> On your turn, add another card on top of your stack — or start a challenge by announcing how many cards you think you can flip without hitting a skull. With no cards in hand, you must challenge.</li>
+        <li><b>Bidding.</b> Going around the table, each rider raises the bid or passes for good. The last one standing is the challenger. Bid the total number of cards on the table and you're the challenger immediately.</li>
+        <li><b>Reveal.</b> The challenger flips <b>all of their own cards first</b>, then flips the top cards of opponents' stacks, one at a time, until they hit their number.</li>
+        <li><b>All roses?</b> Challenge won. Your mat flips to its rose side. A second win takes the game.</li>
+        <li><b>Hit a skull?</b> You lose a card for good. Your own skull: you choose which card to lose. Someone else's: they take one at random — and only you see what it was.</li>
+        <li><b>Out of cards?</b> You're eliminated. The challenger starts the next round (if they're out, the skull's owner — or, for their own skull, a rider of their choosing — does).</li>
+      </ol>
+      <p class="tip">Tip: bluff with your skull, and remember who bids high.</p>
+      <div class="modal-actions"><button class="btn primary">Got it</button></div>
+    </form>
+  </dialog>
+
+  <!-- ===== Game over ===== -->
+  <dialog id="gameover" class="modal">
+    <div class="modal-body center-text">
+      <div id="gameover-art" class="gameover-art"></div>
+      <h2 id="gameover-title"></h2>
+      <p id="gameover-sub"></p>
+      <div class="modal-actions">
+        <button class="btn primary" data-cmd="play-again">Rematch</button>
+        <button class="btn ghost" data-cmd="new-game">Change table</button>
+      </div>
+    </div>
+  </dialog>
+</body>
+</html>
