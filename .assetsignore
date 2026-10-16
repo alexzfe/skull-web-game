@@ -1,0 +1,12 @@
+worker/
+test/
+qa/
+node_modules/
+.wrangler/
+.git
+.gitignore
+.assetsignore
+*.md
+*.pdf
+wrangler.toml
+package*.json

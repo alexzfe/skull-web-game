@@ -5,6 +5,11 @@
   "private": true,
   "scripts": {
     "test": "node --test test/",
-    "start": "npx --yes serve -l 5173 ."
+    "start": "npx --yes serve -l 5173 .",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.151.0"
   }
 }

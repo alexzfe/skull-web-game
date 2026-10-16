@@ -1,0 +1,17 @@
+name = "skull"
+main = "worker/index.js"
+compatibility_date = "2026-10-12"
+routes = [{ pattern = "skull.xlobax.com", custom_domain = true }]
+assets = { directory = ".", binding = "ASSETS", run_worker_first = ["/api/*"] }
+
+[[durable_objects.bindings]]
+name = "ROOM"
+class_name = "Room"
+
+[[durable_objects.bindings]]
+name = "LOBBIES"
+class_name = "LobbyDirectory"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room", "LobbyDirectory"]

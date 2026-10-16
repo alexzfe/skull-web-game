@@ -627,3 +627,59 @@ test('500 random games: invariants hold and a winner always emerges', () => {
   assert.ok(byWins > 0, 'some games won by 2 wins');
   assert.ok(byStanding > 0, 'some games won by last player standing');
 });
+
+describe('forfeit (multiplayer §8)', () => {
+  // P0 bids 1 on their own rose and wins -> round-over, P0 starts next.
+  function roundOver(n = 3) {
+    let s = inPlacement(n, Array(n).fill(ROSE));
+    s = act(s, { type: 'bid', player: 0, amount: 1 });
+    for (let i = 1; i < n; i++) s = act(s, { type: 'pass', player: i });
+    s = act(s, { type: 'reveal', player: 0, target: 0 });
+    assert.equal(s.phase, 'round-over');
+    return s;
+  }
+
+  test('eliminates the player, clears hand and mat, logs it', () => {
+    const s0 = roundOver(4);
+    const s = act(s0, { type: 'forfeit', player: 2 });
+    assert.equal(s.players[2].eliminated, true);
+    assert.deepEqual(s.players[2].hand, []);
+    assert.deepEqual(s.players[2].mat, []);
+    assert.equal(s.phase, 'round-over');
+    assert.equal(s.firstPlayer, 0);
+    assert.match(s.log.at(-1), /P2 forfeits/);
+    assert.equal(s0.players[2].eliminated, false, 'input not mutated');
+    const next = act(s, { type: 'nextRound' });
+    assert.deepEqual(next.players[2].hand, []);
+    assert.deepEqual(legalActions(next, 2), []);
+  });
+
+  test('forfeiting next first player moves first player to nextActive', () => {
+    const s = act(roundOver(4), { type: 'forfeit', player: 0 });
+    assert.equal(s.firstPlayer, 1);
+    assert.equal(s.currentPlayer, 1);
+    assert.equal(act(s, { type: 'nextRound' }).currentPlayer, 1);
+  });
+
+  test('one active player left -> game-over with that winner', () => {
+    let s = act(roundOver(3), { type: 'forfeit', player: 1 });
+    assert.equal(s.phase, 'round-over');
+    s = act(s, { type: 'forfeit', player: 0 });
+    assert.equal(s.phase, 'game-over');
+    assert.equal(s.winner, 2);
+  });
+
+  test('rejected outside round-over and for eliminated players', () => {
+    const s = inPlacement(3);
+    assert.throws(() => act(s, { type: 'forfeit', player: 1 }), /Illegal/);
+    assert.throws(() => act(createGame({ players: PLAYERS(3) }), { type: 'forfeit', player: 0 }), /Illegal/);
+    const f = act(roundOver(4), { type: 'forfeit', player: 3 });
+    assert.throws(() => act(f, { type: 'forfeit', player: 3 }), /Illegal/);
+    assert.throws(() => act(f, { type: 'forfeit', player: 9 }), /Illegal/);
+  });
+
+  test('is never offered by legalActions', () => {
+    const s = roundOver(3);
+    for (const p of s.players) assert.ok(legalActions(s, p.id).every(a => a.type !== 'forfeit'));
+  });
+});

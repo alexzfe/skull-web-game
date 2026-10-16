@@ -169,6 +169,7 @@ function actionKey(a) {
 export function applyAction(state, action, rng = Math.random) {
   if (!action || typeof action.type !== 'string') throw new Error('applyAction: missing action type');
   if (state.phase === 'game-over') throw new Error('Game is over');
+  if (action.type === 'forfeit') return doForfeit(state, action);
 
   const legal = action.type === 'nextRound'
     ? legalActions(state, 0)
@@ -359,6 +360,28 @@ function endGame(s, winner) {
   s.winner = winner;
   s.currentPlayer = winner;
   log(s, `${name(s, winner)} wins the game!`);
+}
+
+// Multiplayer: a player who left or abandoned is eliminated between rounds
+// (MULTIPLAYER_SPEC §8). Not part of legalActions; only the server applies it.
+function doForfeit(state, { player }) {
+  if (state.phase !== 'round-over') throw new Error(`Illegal action forfeit in phase ${state.phase}`);
+  const p = state.players[player];
+  if (!p || p.eliminated) throw new Error(`Illegal action forfeit for player ${player}`);
+  const s = clone(state);
+  const f = s.players[player];
+  f.eliminated = true;
+  f.hand = [];
+  // Its mat would come back to hand at nextRound, so it goes too.
+  f.mat = [];
+  f.revealed = 0;
+  log(s, `${f.name} forfeits.`);
+  if (checkLastStanding(s)) return s;
+  if (s.firstPlayer === player) {
+    s.firstPlayer = nextActive(s, player);
+    s.currentPlayer = s.firstPlayer;
+  }
+  return s;
 }
 
 function doNextRound(s) {
