@@ -1,7 +1,9 @@
-// DOM rendering for the Skull & Roses table. Pure view: it renders a state and
+// DOM rendering for the Skull & Roses table. Pure view: it renders a *view*
+// (src/view.js: the state as one player may see it, `view.me` = that player) and
 // reports the human's chosen actions via callbacks; it never applies rules itself.
 import { ROSE, SKULL, totalOnMats, legalActions, possessive } from './engine.js';
 import { bonesSVG } from './coach.js';
+import { seatOrder, ringAt, NUDGE_MS } from './shell-core.js';
 
 const SEAT_COLORS = ['#f5b041', '#2de2ff', '#b46cff', '#5bd46b', '#ff5d8f', '#ff8a3a'];
 export const seatColor = id => SEAT_COLORS[id % SEAT_COLORS.length];
@@ -92,6 +94,8 @@ export function createUI(handlers) {
     log: $('#log-list'), logDetails: $('#log-details'),
     banners: $('#banner-layer'), toasts: $('#toasts'),
     rules: $('#rules'), gameover: $('#gameover'),
+    newGameBtn: $('#game .top-actions [data-cmd="new-game"]'),
+    leaveBtn: $('#game .top-actions [data-cmd="leave"]'), soundBtn: $('#game .top-actions [data-cmd="sound"]'),
   };
 
   // decorate setup screen art
@@ -142,6 +146,8 @@ export function createUI(handlers) {
       case 'rules': el.rules.showModal(); break;
       case 'learn': handlers.onLearn(el.setup.hidden ? null : readSettings()); break;
       case 'new-game': closeGameOver(); handlers.onNewGame(); break;
+      case 'leave': handlers.onLeave?.(); break;
+      case 'sound': handlers.onSound?.(); break;
       case 'play-again': closeGameOver(); handlers.onPlayAgain(); break;
       case 'bid-dec': stepBid(-1); break;
       case 'bid-inc': stepBid(1); break;
@@ -161,17 +167,43 @@ export function createUI(handlers) {
 
   // ---------- screens ----------
 
+  // Exactly one `.screen` section is visible at a time.
+  function showScreen(id) {
+    document.querySelectorAll('body > .screen').forEach(n => { n.hidden = n.id !== id; });
+  }
+
   function showSetup(settings) {
     closeGameOver();
     if (settings) fillSettings(settings);
-    el.game.hidden = true;
-    el.setup.hidden = false;
-    el.setup.querySelector('#play-now').focus({ preventScroll: true });
+    showScreen('setup');
+    if (!window.matchMedia('(max-width: 640px)').matches) el.setup.querySelector('#play-now').focus({ preventScroll: true });
   }
 
   function showGame() {
-    el.setup.hidden = true;
-    el.game.hidden = false;
+    showScreen('game');
+  }
+
+  // Multiplayer tables swap the top bar's restart button for Leave + 🔊.
+  function setMode({ mp = false, sound = true } = {}) {
+    el.game.classList.toggle('mp', mp);
+    el.newGameBtn.hidden = mp;
+    el.leaveBtn.hidden = !mp;
+    el.soundBtn.hidden = !mp;
+    setSoundIcon(sound);
+  }
+
+  function setSoundIcon(on) {
+    el.soundBtn.textContent = on ? '🔊' : '🔇';
+    el.soundBtn.setAttribute('aria-pressed', String(on));
+    el.soundBtn.title = on ? 'Sound on' : 'Sound off';
+  }
+
+  // Your clock is almost out: shake your seat.
+  function nudge() {
+    el.me.classList.remove('nudge');
+    void el.me.offsetWidth;   // restart the animation
+    el.me.classList.add('nudge');
+    setTimeout(() => el.me.classList.remove('nudge'), 900);
   }
 
   function reset() {
@@ -187,8 +219,12 @@ export function createUI(handlers) {
 
   // ---------- render ----------
 
-  function render(state, view) {
-    last = { state, view };
+  // `opts` (all optional): locked, ghost, xray, gameOverControls, autoNextMs, and for
+  // multiplayer: mp, seats (server seat info by id), clocks ({id: {at, total}}), now.
+  function render(gameView, opts = {}) {
+    last = { state: gameView, view: opts };
+    let state = gameView;
+    const view = { ...opts, humanId: gameView.me ?? opts.humanId ?? 0 };
     const human = view.humanId;
     actions = view.locked ? [] : legalActions(state, human).filter(a => a.type !== 'nextRound');
     state = withGhost(state, view.ghost);
@@ -201,7 +237,7 @@ export function createUI(handlers) {
 
     const ctx = { state, view, revealTargets, xrayFresh: !!view.xray && !wasXray };
     el.table.classList.toggle('xray', !!view.xray);
-    const opp = state.players.filter(p => p.id !== human);
+    const opp = seatOrder(state.players.length, human).map(id => state.players[id]);
     el.opponents.style.setProperty('--n', opp.length);
     el.opponents.innerHTML = opp.map((p, k) => seatHTML(p, ctx, k, opp.length)).join('');
     el.me.innerHTML = seatHTML(state.players[human], ctx, 0, 1, true);
@@ -209,7 +245,7 @@ export function createUI(handlers) {
     el.status.innerHTML = statusHTML(state, human, view);
     el.controls.innerHTML = controlsHTML(state, view);
     el.hand.innerHTML = handHTML(state, view);
-    renderLog(state);
+    renderLog(state, gameView.lastAction);
 
     shown = new Map(state.players.map(p => [p.id, { len: p.mat.length, revealed: p.revealed }]));
     wasXray = !!view.xray;
@@ -239,7 +275,13 @@ export function createUI(handlers) {
     if (state.bid && state.bid.player === p.id && ['bidding', 'reveal'].includes(state.phase)) badges.push(`<span class="badge bid">Bid ${state.bid.amount}</span>`);
     if (state.challenger === p.id && ['reveal', 'discard', 'round-over', 'choose-first', 'game-over'].includes(state.phase) && state.challenger != null) badges.push(`<span class="badge chal">Challenger</span>`);
     if (p.passed && bidding) badges.push(`<span class="badge passed">Passed</span>`);
-    if (p.eliminated) badges.push(`<span class="badge out">Out</span>`);
+    const seat = view.seats?.[p.id];
+    const left = !!seat?.forfeited;
+    const away = !!seat && !left && !seat.connected && !seat.isBot;
+    if (p.eliminated && !left) badges.push(`<span class="badge out">Out</span>`);
+    if (left) badges.push(`<span class="badge left">Left</span>`);
+    if (away) badges.push(`<span class="badge away" title="Connection lost — the clock keeps running">📡 reconnecting…</span>`);
+    if (seat?.isBot) badges.push(`<span class="badge bot" title="Filler bot">🤖</span>`);
     if (state.winner === p.id) badges.push(`<span class="badge crown">Winner</span>`);
 
     // stack, bottom → top
@@ -283,12 +325,16 @@ export function createUI(handlers) {
     const wins = `<div class="wins" data-tut="wins" data-player="${p.id}" title="${p.wins} win${p.wins === 1 ? '' : 's'}">${[0, 1].map(w => `<i class="${w < p.wins ? 'on' : ''}"></i>`).join('')}</div>`;
 
     const arc = n > 1 ? Math.abs((k - (n - 1) / 2) / ((n - 1) / 2)) : 0;
-    const classes = ['seat', isMe && 'me', isTurn && 'turn', thinking && 'thinking', target && 'target', p.eliminated && 'eliminated', p.passed && bidding && 'passed', state.winner === p.id && 'winner'].filter(Boolean).join(' ');
+    const clock = view.clocks?.[p.id];
+    const ring = clock ? ringAt(clock, view.now ?? Date.now()) : null;
+    const classes = ['seat', isMe && 'me', isTurn && 'turn', thinking && 'thinking', target && 'target', p.eliminated && 'eliminated', p.passed && bidding && 'passed', state.winner === p.id && 'winner',
+      left && 'left', away && 'away', ring && 'clock', ring && ring.left <= NUDGE_MS && 'urgent'].filter(Boolean).join(' ');
     const attrs = target ? `data-action-index="${revealTargets.get(p.id)}" role="button" tabindex="0" aria-label="Flip ${esc(possessive(p.name))} top card"` : '';
 
     return `<div class="${classes}" style="--seat:${seatColor(p.id)};--arc:${arc.toFixed(2)}" data-tut="${isMe ? 'my-seat' : 'seat'}" data-player="${p.id}" ${attrs}>
       <div class="seat-head">
-        <span class="seat-name">${esc(isMe ? `${p.name} (you)` : p.name)}</span>
+        ${seat ? avatarHTML(seat.avatar, clock, ring) : ''}
+        <span class="seat-name">${esc(left ? `${p.name} left` : isMe ? `${p.name} (you)` : p.name)}</span>
         ${wins}${thinking ? '<span class="thinking-dots" aria-hidden="true">…</span>' : ''}
       </div>
       <div class="mat ${p.wins > 0 ? 'rose-side' : 'skull-side'}" data-tut="${isMe ? 'my-mat' : 'stack'}" data-player="${p.id}">
@@ -301,6 +347,19 @@ export function createUI(handlers) {
       ${handMini}
       ${p.eliminated ? '' : isMe ? `<div class="owned">${owned} card${owned === 1 ? '' : 's'} left</div>` : ''}
     </div>`;
+  }
+
+  // Multiplayer seat avatar; with a running clock it wears a draining ring. The ring
+  // is a CSS animation started mid-way (negative delay), so re-renders don't reset it;
+  // a second animation turns it red for the last NUDGE_MS.
+  function avatarHTML(avatar, clock, ring) {
+    const emoji = esc(avatar?.emoji || '💀');
+    if (!clock) return `<span class="seat-av">${emoji}</span>`;
+    const elapsed = clock.total - ring.left;
+    const style = `animation-duration:${clock.total}ms,300ms;animation-delay:${-Math.round(elapsed)}ms,${Math.round(ring.left - NUDGE_MS)}ms`;
+    return `<span class="seat-av">${emoji}<svg class="ring" viewBox="0 0 40 40" aria-hidden="true">
+      <circle class="ring-bg" cx="20" cy="20" r="18" pathLength="100"/>
+      <circle class="ring-fg" cx="20" cy="20" r="18" pathLength="100" style="${style}"/></svg></span>`;
   }
 
   function centerHTML(state, view) {
@@ -362,6 +421,7 @@ export function createUI(handlers) {
     if (view.locked) return prompt('…', 'muted');
 
     if (state.phase === 'game-over') {
+      if (view.mp) return prompt(`${state.winner === view.humanId ? 'You rule the bar tonight.' : 'Game over.'} Back to the lobby in a moment…`, 'muted');
       if (view.gameOverControls === false) return prompt(state.winner === view.humanId ? 'Game over — you took it.' : 'Game over.', 'muted');
       return prompt(state.winner === view.humanId ? 'You rule the bar tonight.' : 'Game over.') +
         `<div class="row"><button class="btn primary" data-cmd="play-again">Rematch</button><button class="btn ghost" data-cmd="new-game">Change table</button></div>`;
@@ -419,8 +479,10 @@ export function createUI(handlers) {
           else msg = `${esc(state.players[r.challenger].name)} lost a card${r.eliminated ? ' and is out' : ''}.`;
         }
         const next = state.players[state.firstPlayer];
+        const starts = next ? `${next.id === view.humanId ? 'You start' : esc(next.name) + ' starts'} next.` : '';
+        if (view.mp) return prompt(`${msg} ${starts}`) + `<p class="prompt muted next-soon">Next round in a moment…</p>`;
         const auto = view.autoNextMs != null;
-        return prompt(`${msg} ${next ? `${next.id === view.humanId ? 'You start' : esc(next.name) + ' starts'} next.` : ''}`) +
+        return prompt(`${msg} ${starts}`) +
           `<div class="row"><button class="btn primary next-btn" data-cmd="next-round" data-tut="next-round">Next round →${
             auto ? `<i class="countdown" style="--ms:${Math.round(view.autoNextMs)}ms" aria-hidden="true"></i>` : ''}</button>${
             auto ? '<span class="auto-hint">or tap the table</span>' : ''}</div>`;
@@ -461,12 +523,14 @@ export function createUI(handlers) {
     }).join('')}</div>`;
   }
 
-  function renderLog(state) {
+  // `lastAction.auto` (multiplayer ⏱ moves) tags the first line that action added.
+  function renderLog(state, lastAction) {
     if (state.log.length < logLen) { el.log.innerHTML = ''; logLen = 0; }
     if (state.log.length === logLen) return;
-    const frag = state.log.slice(logLen).map(line => {
+    const frag = state.log.slice(logLen).map((line, k) => {
       const cls = /SKULL|loses|eliminated/.test(line) ? 'bad' : /wins/.test(line) ? 'good' : /Round \d+ begins/.test(line) ? 'round' : '';
-      return `<li class="${cls}">${esc(line)}</li>`;
+      const auto = k === 0 && lastAction?.auto ? '<span class="auto-tag" title="Out of time: automatic move">⏱</span> ' : '';
+      return `<li class="${cls}">${auto}${esc(line)}</li>`;
     }).join('');
     el.log.insertAdjacentHTML('beforeend', frag);
     logLen = state.log.length;
@@ -485,7 +549,7 @@ export function createUI(handlers) {
   // the table deals the next round right away
   document.addEventListener('click', e => {
     if (e.target.closest('[data-cmd="next-round"]')) { handlers.onNextRound(); return; }
-    if (last?.state.phase === 'round-over' && !last.view.locked && el.tableWrap.contains(e.target) &&
+    if (last?.state.phase === 'round-over' && !last.view.locked && !last.view.mp && el.tableWrap.contains(e.target) &&
         !e.target.closest('button, a, input, [data-cmd], [data-action-index]')) handlers.onNextRound();
   });
 
@@ -563,5 +627,5 @@ export function createUI(handlers) {
 
   function setFastBanners(on) { fastBanners = !!on; }
 
-  return { render, showSetup, showGame, reset, banner, toast, showGameOver, setFastBanners };
+  return { render, showSetup, showGame, showScreen, setMode, setSoundIcon, nudge, reset, banner, toast, showGameOver, setFastBanners };
 }
