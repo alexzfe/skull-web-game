@@ -320,6 +320,42 @@ describe('remote controller', () => {
     assert.equal(socks.all.length, 2);
   });
 
+  test('repeated failed upgrades while the server answers (426) → not-found', async () => {
+    const { rc, socks, timers } = setup({ probeStatus: 426 });
+    socks.last().drop();
+    await flush();
+    timers.advance(500);
+    socks.last().drop();
+    await flush();
+    assert.equal(rc.status(), 'not-found');
+    timers.advance(60_000);
+    assert.equal(socks.all.length, 2);
+  });
+
+  test('failed upgrades while offline keep retrying', async () => {
+    const { rc, socks, timers } = setup({ fetch: async () => { throw new TypeError('offline'); } });
+    for (let i = 0; i < 4; i++) {
+      socks.last().drop();
+      await flush();
+      timers.advance(5000);
+    }
+    assert.equal(rc.status(), 'reconnecting');
+    assert.equal(socks.all.length, 5);
+  });
+
+  test('a good connection resets the failed-upgrade count', async () => {
+    const { rc, socks, timers } = setup({ probeStatus: 426 });
+    socks.last().drop();
+    await flush();
+    timers.advance(500);
+    socks.last().open();
+    socks.last().drop();
+    timers.advance(5000);
+    socks.last().drop();
+    await flush();
+    assert.equal(rc.status(), 'reconnecting');
+  });
+
   test('server close codes are final', () => {
     const cases = [[4000, 'replaced'], [4001, 'kicked'], [4002, 'closed'], [4004, 'not-found'], [4009, 'full']];
     for (const [code, status] of cases) {

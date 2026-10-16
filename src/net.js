@@ -35,6 +35,7 @@ const CODE_RE = new RegExp(`^[${CODE_ALPHABET}]{4}$`);
 const TOKEN_KEY = 'skull.token';
 const BACKOFF_MS = [500, 1000, 2000, 4000, 5000];
 const OFFSET_SMOOTHING = 0.25;   // weight of a new serverNow sample
+const MAX_REFUSED = 2;           // failed upgrades with the server reachable → not-found
 
 const env = opts => ({
   WebSocket: opts.WebSocket ?? globalThis.WebSocket,
@@ -156,6 +157,7 @@ export function createRemoteController({ code, name, avatar, token, base, ...opt
   let status = null;
   let ws = null;
   let attempt = 0;          // failed connects since the last good one
+  let refused = 0;          // upgrades that failed while the server answered HTTP
   let retryTimer = null;
   let lastSeq = -Infinity;
   const last = { view: null, lobby: null };   // view entry is [view, meta]
@@ -190,6 +192,7 @@ export function createRemoteController({ code, name, avatar, token, base, ...opt
     sock.onopen = () => {
       if (ws !== sock) return;
       opened = true;
+      refused = 0;
       setStatus('open');
       sock.send(JSON.stringify({ t: 'hello', name, avatar }));
     };
@@ -219,11 +222,18 @@ export function createRemoteController({ code, name, avatar, token, base, ...opt
   }
 
   // A browser can't see the 404 behind a failed upgrade, so ask over plain HTTP.
+  // A 404 settles it. The server may answer 426 (no Upgrade header) before it looks
+  // the room up, so if the server is reachable but the upgrade fails twice in a row,
+  // the room is treated as gone too. Network errors (offline) just keep retrying.
   function probeMissing() {
     if (!e.fetch) return;
     Promise.resolve()
       .then(() => e.fetch(`${origin || ''}${path}`))
-      .then(res => { if (res?.status === 404 && !FINAL.has(status)) finish('not-found'); })
+      .then(res => {
+        if (FINAL.has(status) || !res) return;
+        refused++;
+        if (res.status === 404 || refused >= MAX_REFUSED) finish('not-found');
+      })
       .catch(() => { /* offline — keep retrying */ });
   }
 
