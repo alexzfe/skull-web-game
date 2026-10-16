@@ -175,3 +175,23 @@ Delivered `src/net.js` (browser ES module, no deps) and `test/net.test.js` (fake
 
 ### For the net agent
 - Close code **4000** (another tab with the same token took the seat) isn't in `CLOSE_CODE_STATUS`. Today the old tab reconnects and steals the seat back, so two open tabs ping-pong forever. Suggest treating 4000 as final (e.g. status `'closed'` or a new `'replaced'`).
+
+## Reactions agent
+
+Delivered `src/reactions.js`, `reactions.css`, `test/reactions.test.js` (pure helpers; `node --test test/` green). Checked by hand in a scratch harness and on top of the real solo game at 390×844. Nothing in `index.html`/`styles.css` was touched.
+
+### API (spec §9, plus one optional field)
+`mountReactions({ root, send, seatEl, me? }) -> { handle(event), destroy() }`
+- `send(kind, target?)`: call it like `rc.react`. If it returns `false` (socket not open), the client cooldown is not started.
+- `seatEl(id)`: looked up again on every use. It must return the **seat** element for player `id` (0..5) or `null`. Note: in the current UI, `[data-player]` also matches other elements (12 hits in a 4-player game), so use something like `` `.seat[data-player="${id}"]` ``.
+- `me` (optional): your player id, or a function returning it. It keeps your own seat out of the tomato targets. Without it, a seat with class `me` is skipped, which works with the current `ui.js`.
+- `handle(ev)`: pass every `e:'react'` event. Invalid ones are ignored (unknown kind, a tomato without a valid `target`, `target === from`). After `destroy()` it does nothing.
+- `destroy()`: removes every node, listener, timer and the injected `<link>`, plus any `.rx-hit` class it added to seats. It can be called more than once.
+
+### Behaviour choices
+- **Picker:** a 44px round button fixed to the right edge at 38% of the height, which is over the table's centre row on a phone, above the player zone. The tray opens leftward as a single pill with 😏 🤔 💀 🌹 😂 | 🍅. It closes after a pick, on a tap outside, on Esc, or by itself after 5s.
+- **Tomato:** picking 🍅 enters aim mode. Pulsing red rings are drawn over every other seat; they track re-renders on each animation frame. A bar at the top says "Tap a rider to throw" and has a Cancel button. Aim mode ends after a throw, Cancel, Esc, a tap on the button, or by itself after 7s.
+- **Cooldown:** 2s on the client, mirroring `REACT_MS`. While it runs, the button is disabled, greyed, and a cyan ring drains around it.
+- **Effects:** a pop-up emoji floats up and fades over the sender's seat (1.6s). The tomato flies along a parabola from the sender's seat to the target's (0.65s, spinning) and lands wherever the target seat is *at landing time*. The splat lingers about 1.5s and the target seat gives a small jolt (`.rx-hit`). If the sender's seat isn't rendered, a pop-up is skipped and a tomato is lobbed from the bottom centre. With `prefers-reduced-motion`, there is no flight, only the splat.
+- **Layering:** z-index 60–62, which is above the toasts (50) and below the coach (80).
+- The CSS URL is resolved from `import.meta.url` (`../reactions.css`), so it works from any page path.

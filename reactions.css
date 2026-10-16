@@ -1,0 +1,183 @@
+/* ============ Reactions (multiplayer) — injected by src/reactions.js ============ */
+/* Uses the theme variables from styles.css (read-only), with fallbacks. */
+
+.rx-fx { position: fixed; inset: 0; pointer-events: none; z-index: 60; overflow: hidden; }
+
+/* ---------- picker: floating button on the right edge, mid-table ---------- */
+/* Sits over the table, away from the player zone (own seat, controls, hand) at the bottom. */
+.rx {
+  position: fixed; z-index: 62;
+  right: calc(8px + env(safe-area-inset-right)); top: 38%;
+  display: flex; align-items: center; gap: 8px;
+}
+.rx-btn {
+  flex: none; position: relative; width: 44px; height: 44px; padding: 0; border-radius: 50%;
+  display: grid; place-items: center; cursor: pointer;
+  background: radial-gradient(circle at 50% 35%, var(--wood2, #3d2416), var(--leather, #1b1311));
+  border: 1px solid var(--line, rgba(239,227,207,.12));
+  box-shadow: 0 4px 14px rgba(0,0,0,.5), 0 0 10px rgba(255,45,111,.25);
+  transition: border-color .15s, box-shadow .15s, transform .15s;
+}
+.rx-btn:hover, .rx.open .rx-btn { border-color: var(--neon, #ff2d6f); box-shadow: 0 4px 14px rgba(0,0,0,.5), 0 0 16px rgba(255,45,111,.55); }
+.rx-btn:active { transform: scale(.94); }
+.rx-btn:focus-visible, .rx-pick:focus-visible, .rx-aim-cancel:focus-visible, .rx-target:focus-visible { outline: 2px solid var(--neon2, #2de2ff); outline-offset: 3px; }
+.rx-btn-face { font-size: 22px; line-height: 1; transition: opacity .2s, filter .2s; }
+.rx.aiming .rx-btn-face { filter: none; }
+.rx-btn:disabled { cursor: default; }
+.rx-btn.cooling .rx-btn-face { opacity: .4; filter: grayscale(1); }
+
+/* Cooldown ring: drains clockwise over the remaining cooldown. */
+@property --rx-p { syntax: '<number>'; inherits: false; initial-value: 0; }
+.rx-btn-ring { position: absolute; inset: -3px; border-radius: 50%; pointer-events: none; opacity: 0; }
+.rx-btn.cooling .rx-btn-ring {
+  opacity: 1;
+  background: conic-gradient(var(--neon2, #2de2ff) calc(var(--rx-p) * 1turn), transparent 0);
+  -webkit-mask: radial-gradient(circle, transparent 23px, #000 24px);
+          mask: radial-gradient(circle, transparent 23px, #000 24px);
+  animation: rx-cool var(--rx-cool, 2s) linear forwards;
+}
+@keyframes rx-cool { from { --rx-p: 1; } to { --rx-p: 0; } }
+
+/* Tray: a compact pill opening leftward over the table. */
+.rx-tray {
+  flex: none; display: flex; gap: 2px; padding: 4px;
+  border-radius: 999px;
+  background: rgba(23, 16, 13, .94);
+  border: 1px solid rgba(255,45,111,.45);
+  box-shadow: 0 6px 22px rgba(0,0,0,.6), 0 0 18px rgba(255,45,111,.25);
+  animation: rx-tray-in .16s ease-out;
+  transform-origin: right center;
+}
+@keyframes rx-tray-in { from { opacity: 0; transform: scaleX(.6); } }
+.rx-pick {
+  flex: none; width: 40px; height: 40px; padding: 0; border: 0; border-radius: 50%;
+  background: transparent; font-size: 22px; line-height: 1; cursor: pointer;
+  transition: background .12s, transform .12s;
+}
+.rx-pick:hover { background: rgba(239,227,207,.08); transform: translateY(-2px); }
+.rx-pick:active { transform: scale(.9); }
+.rx-pick-tomato { margin-left: 4px; position: relative; }
+.rx-pick-tomato::before {
+  content: ''; position: absolute; left: -4px; top: 8px; bottom: 8px; width: 1px; background: var(--line, rgba(239,227,207,.12));
+}
+
+/* ---------- aim mode (tomato) ---------- */
+.rx-aim { position: fixed; inset: 0; z-index: 61; pointer-events: none; }
+.rx-targets { position: absolute; inset: 0; }
+.rx-target {
+  position: absolute; padding: 0; pointer-events: auto; cursor: crosshair;
+  border-radius: var(--radius, 14px);
+  border: 2px dashed var(--bad, #ff3b4e);
+  background: rgba(255, 59, 78, .12);
+  box-shadow: 0 0 18px rgba(255,59,78,.45), inset 0 0 18px rgba(255,59,78,.25);
+  display: grid; place-items: center;
+  animation: rx-target-pulse 1s ease-in-out infinite alternate;
+}
+.rx-target span { font-size: 26px; filter: drop-shadow(0 2px 4px rgba(0,0,0,.6)); }
+@keyframes rx-target-pulse { to { background: rgba(255,59,78,.22); box-shadow: 0 0 26px rgba(255,59,78,.7), inset 0 0 22px rgba(255,59,78,.35); } }
+.rx-aim-bar {
+  position: absolute; left: 50%; top: calc(58px + env(safe-area-inset-top)); translate: -50% 0;
+  display: flex; align-items: center; gap: 10px; white-space: nowrap;
+  padding: 6px 6px 6px 14px; border-radius: 999px; pointer-events: auto;
+  background: rgba(23, 16, 13, .95); color: var(--ink, #efe3cf);
+  border: 1px solid rgba(255,59,78,.55);
+  box-shadow: 0 6px 20px rgba(0,0,0,.6);
+  font-family: var(--font-ui, system-ui, sans-serif); font-size: 15px; letter-spacing: .04em;
+}
+.rx-aim-cancel {
+  padding: 5px 12px; border-radius: 999px; cursor: pointer;
+  background: transparent; color: var(--muted, #a3907b);
+  border: 1px solid var(--line, rgba(239,227,207,.12));
+  font-size: 13px; text-transform: uppercase; letter-spacing: .1em;
+}
+.rx-aim-cancel:hover { color: var(--ink, #efe3cf); border-color: var(--muted, #a3907b); }
+
+/* ---------- pop-up emoji over the sender's seat ---------- */
+.rx-pop {
+  position: absolute; translate: -50% -50%;
+  font-size: 40px; line-height: 1;
+  filter: drop-shadow(0 3px 6px rgba(0,0,0,.7)) drop-shadow(0 0 10px rgba(255,45,111,.35));
+  animation: rx-pop 1.6s cubic-bezier(.2,.8,.3,1) forwards;
+  will-change: transform, opacity;
+}
+@keyframes rx-pop {
+  0%   { transform: translate(0, 10px) scale(.2); opacity: 0; }
+  14%  { transform: translate(0, -14px) scale(1.25); opacity: 1; }
+  24%  { transform: translate(0, -18px) scale(1); }
+  70%  { opacity: 1; }
+  100% { transform: translate(var(--rx-drift, 0px), -70px) scale(.9); opacity: 0; }
+}
+
+/* ---------- tomato flight + splat ---------- */
+/* x moves linearly, y moves linearly, the bump goes up then down: together a parabola. */
+.rx-fly { position: absolute; width: 0; height: 0; animation: rx-fly-x var(--rx-fly, .65s) linear forwards; }
+.rx-fly-y { animation: rx-fly-y var(--rx-fly, .65s) linear forwards; }
+.rx-fly-bump { animation: rx-fly-bump var(--rx-fly, .65s) forwards; }
+.rx-fly-tomato {
+  display: block; translate: -50% -50%; font-size: 34px; line-height: 1;
+  filter: drop-shadow(0 4px 6px rgba(0,0,0,.6));
+  animation: rx-spin var(--rx-fly, .65s) linear forwards;
+}
+@keyframes rx-fly-x { to { transform: translateX(var(--dx)); } }
+@keyframes rx-fly-y { to { transform: translateY(var(--dy)); } }
+@keyframes rx-fly-bump {
+  0%   { transform: translateY(0); animation-timing-function: cubic-bezier(.33,0,.67,1); }
+  50%  { transform: translateY(calc(var(--h) * -1)); animation-timing-function: cubic-bezier(.33,0,.67,1); }
+  100% { transform: translateY(0); }
+}
+@keyframes rx-spin { from { transform: rotate(0) scale(.9); } to { transform: rotate(calc(var(--spin, 1) * 540deg)) scale(1.15); } }
+
+.rx-splat { position: absolute; width: 0; height: 0; animation: rx-splat-out 1.9s linear forwards; }
+.rx-splat-goo {
+  position: absolute; left: -38px; top: -38px; width: 76px; height: 76px;
+  rotate: var(--rx-rot, 0deg);
+  background:
+    radial-gradient(circle at 50% 50%, #e8202f 0 34%, transparent 35%),
+    radial-gradient(circle at 18% 30%, #d4143a 0 11%, transparent 12%),
+    radial-gradient(circle at 82% 22%, #e8202f 0 9%, transparent 10%),
+    radial-gradient(circle at 86% 70%, #c0102c 0 12%, transparent 13%),
+    radial-gradient(circle at 30% 84%, #e8202f 0 10%, transparent 11%),
+    radial-gradient(circle at 60% 8%, #c0102c 0 6%, transparent 7%),
+    radial-gradient(circle at 6% 62%, #e8202f 0 6%, transparent 7%),
+    radial-gradient(circle at 64% 96%, #d4143a 0 5%, transparent 6%);
+  filter: drop-shadow(0 0 8px rgba(232, 32, 47, .55));
+  opacity: .92;
+  animation: rx-splat-in .22s cubic-bezier(.2,1.6,.4,1) both;
+}
+.rx-splat-goo::after {   /* seeds + a little shine */
+  content: ''; position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse 5% 3% at 44% 46%, #ffd76a 0 100%, transparent 101%),
+    radial-gradient(ellipse 5% 3% at 58% 54%, #ffd76a 0 100%, transparent 101%),
+    radial-gradient(ellipse 4% 3% at 50% 60%, #ffd76a 0 100%, transparent 101%),
+    radial-gradient(circle at 40% 38%, rgba(255,255,255,.45) 0 4%, transparent 5%);
+}
+.rx-splat-face {
+  position: absolute; left: 0; top: 0; translate: -50% -50%; font-size: 22px; line-height: 1;
+  animation: rx-squash .4s ease-out forwards;
+}
+@keyframes rx-splat-in { from { transform: scale(.2); } }
+@keyframes rx-squash { 0% { transform: scale(1.3, .7); opacity: 1; } 100% { transform: scale(1.9, .35) translateY(6px); opacity: 0; } }
+@keyframes rx-splat-out { 0%, 79% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; transform: translateY(10px); } }
+
+/* The target seat flinches. */
+.rx-hit { animation: rx-hit .45s ease-out; }
+@keyframes rx-hit {
+  0% { transform: translateX(0); } 20% { transform: translateX(-5px) rotate(-1.5deg); }
+  45% { transform: translateX(4px) rotate(1deg); } 70% { transform: translateX(-2px); } 100% { transform: none; }
+}
+
+@media (max-width: 420px) {
+  .rx { right: calc(6px + env(safe-area-inset-right)); }
+  .rx-btn { width: 42px; height: 42px; }
+  .rx-pick { width: 36px; height: 36px; font-size: 20px; }
+  .rx-pop { font-size: 34px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rx-pop { animation: rx-fade 1.6s linear forwards; }
+  .rx-target, .rx-hit, .rx-tray { animation: none; }
+  .rx-splat-goo, .rx-splat-face { animation: none; }
+  .rx-splat-face { opacity: 0; }
+}
+@keyframes rx-fade { 0% { opacity: 0; } 10%, 70% { opacity: 1; } 100% { opacity: 0; } }
