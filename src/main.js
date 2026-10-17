@@ -613,7 +613,7 @@ async function shareRoom() {
   if (!mp) return;
   const url = shareLink(mp.code);
   if (navigator.share) {
-    try { await navigator.share({ title: 'Skull & Roses', text: `Pull up a chair — table ${mp.code}`, url }); } catch { /* cancelled */ }
+    try { await navigator.share({ title: 'Petals & Bones', text: `Pull up a chair — table ${mp.code}`, url }); } catch { /* cancelled */ }
     return;
   }
   try {
