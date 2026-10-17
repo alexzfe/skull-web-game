@@ -223,7 +223,7 @@
   #game.mp .toast { padding: 5px 10px; font-size: 14px; }
 }
 @media (max-width: 640px) {
-  #game.mp .toasts { top: 5px; right: 136px; }
+  #game.mp .toasts { top: 5px; right: 178px; }
 }
 
 /* ---------- MP fix batch (2026-10-16) ---------- */

@@ -102,6 +102,13 @@ export function createUI(handlers) {
   el.setup.querySelectorAll('[data-face]').forEach(n => { n.innerHTML = FRONT[n.dataset.face]; });
   el.setup.querySelectorAll('[data-bones]').forEach(n => { n.innerHTML = bonesSVG({ mood: n.dataset.bones, crop: 'head' }); });
   if (window.matchMedia('(max-width: 900px)').matches) el.logDetails.open = false;
+  // Phones: the log is a drop-down sheet behind the top-bar button; a tap outside closes it.
+  const logBtn = $('#game .top-actions [data-cmd="log"]');
+  el.logDetails.addEventListener('toggle', () => logBtn.setAttribute('aria-expanded', String(el.logDetails.open)));
+  document.addEventListener('pointerdown', e => {
+    if (el.logDetails.open && window.matchMedia('(max-width: 640px)').matches &&
+        !e.target.closest('.log-panel, [data-cmd="log"]')) el.logDetails.open = false;
+  });
 
   let actions = [];           // legal actions offered to the human in the current render
   let bidValue = null;
@@ -150,6 +157,7 @@ export function createUI(handlers) {
       case 'new-game': closeGameOver(); handlers.onNewGame(); break;
       case 'leave': handlers.onLeave?.(); break;
       case 'sound': handlers.onSound?.(); break;
+      case 'log': el.logDetails.open = !el.logDetails.open; break;
       case 'play-again': closeGameOver(); handlers.onPlayAgain(); break;
       case 'bid-dec': stepBid(-1); break;
       case 'bid-inc': stepBid(1); break;
@@ -216,6 +224,7 @@ export function createUI(handlers) {
     bidValue = null;
     wasXray = false;
     wasMyMove = false;
+    fitTo = '';
     closeGameOver();
     hideWinner();
   }
@@ -261,8 +270,27 @@ export function createUI(handlers) {
     if (myMove && !wasMyMove && view.autoScroll) revealControls();
     wasMyMove = myMove;
     el.game.classList.toggle('my-move', myMove);
+    fitPhone();
     if (myMove && coversStatus()) [...el.toasts.children].forEach(t => { if (!t.classList.contains('bad')) t.remove(); });
   }
+
+  // Phones: the game must fit one screen. When a render overflows (a bid row, the
+  // reveal pips, a Next round button…), zoom the table, your mat and your hand down
+  // a step until it fits. It only shrinks within a game, so cards don't resize from
+  // phase to phase; a new game or a new screen size starts again at full size.
+  let fit = 1, fitTo = '';
+  function fitPhone() {
+    const phone = window.matchMedia('(max-width: 640px)').matches;
+    const key = phone ? `${window.innerWidth}x${window.innerHeight}` : '';
+    if (key !== fitTo) { fitTo = key; fit = 1; el.game.style.removeProperty('--fit'); }
+    if (!phone || el.game.hidden) return;
+    const root = document.documentElement;
+    while (root.scrollHeight > root.clientHeight && fit > 0.7) {
+      fit = Math.round((fit - 0.04) * 100) / 100;
+      el.game.style.setProperty('--fit', fit);
+    }
+  }
+  window.addEventListener('resize', () => { if (last) fitPhone(); });
 
   // Your move just started: if your buttons or hand are off screen, bring them up.
   function revealControls() {
