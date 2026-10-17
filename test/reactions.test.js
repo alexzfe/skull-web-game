@@ -1,10 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { KINDS, EMOJI, COOLDOWN_MS, parseReact, createCooldown, anchor, flight } from '../src/reactions.js';
-import { REACTIONS, REACT_MS } from '../worker/room-core.js';
+import { KINDS, EMOJI, TARGETED, COOLDOWN_MS, parseReact, createCooldown, createToasts, anchor, flight, beam } from '../src/reactions.js';
+import { REACTIONS, TARGETED as SERVER_TARGETED, REACT_MS } from '../worker/room-core.js';
 
 test('kinds and cooldown mirror the server', () => {
   assert.deepEqual(KINDS.map(k => k.id), REACTIONS);
+  assert.deepEqual(TARGETED, SERVER_TARGETED);
   assert.equal(COOLDOWN_MS, REACT_MS);
   assert.equal(EMOJI.tomato, '🍅');
 });
@@ -12,6 +13,8 @@ test('kinds and cooldown mirror the server', () => {
 test('parseReact accepts pop-ups and tomato throws', () => {
   assert.deepEqual(parseReact({ t: 'event', e: 'react', from: 2, kind: 'laugh' }), { from: 2, kind: 'laugh' });
   assert.deepEqual(parseReact({ e: 'react', from: 0, kind: 'tomato', target: 3 }), { from: 0, kind: 'tomato', target: 3 });
+  for (const kind of ['bouquet', 'accuse', 'cheers'])
+    assert.deepEqual(parseReact({ e: 'react', from: 4, kind, target: 1 }), { from: 4, kind, target: 1 });
   // a stray target on a pop-up is ignored
   assert.deepEqual(parseReact({ e: 'react', from: 1, kind: 'rose', target: 2 }), { from: 1, kind: 'rose' });
 });
@@ -25,6 +28,8 @@ test('parseReact drops junk', () => {
     { e: 'react', from: 0, kind: 'tomato' },
     { e: 'react', from: 0, kind: 'tomato', target: 0 },
     { e: 'react', from: 0, kind: 'tomato', target: 1.5 },
+    { e: 'react', from: 0, kind: 'cheers' },
+    { e: 'react', from: 2, kind: 'accuse', target: 2 },
     { e: 'react', from: 0, kind: '__proto__' },
   ]) assert.equal(parseReact(ev), null, JSON.stringify(ev));
 });
@@ -50,4 +55,23 @@ test('anchor and flight geometry', () => {
   assert.equal(f.spin, -1);
   assert.equal(f.h, 160);                        // capped
   assert.equal(flight({ x: 0, y: 0 }, { x: 0, y: 0 }).h, 40);
+});
+
+test('cheers raised back within the window makes a toast, once', () => {
+  const t = createToasts(4000);
+  assert.equal(t.note(0, 1, 1000), false);
+  assert.equal(t.note(2, 1, 1500), false, 'a third party does not complete it');
+  assert.equal(t.note(1, 0, 4000), true);
+  assert.equal(t.note(0, 1, 4500), false, 'the toast used up both glasses');
+  assert.equal(t.note(1, 0, 9000), false, 'too late');
+  assert.equal(t.note(1, 2, 9000), false, '2 raised to 1 at 1500, long ago');
+  assert.equal(t.note(0, 1, 10000), true, '1 raised to 0 at 9000');
+});
+
+test('flight arc scales; beam angle and flip', () => {
+  assert.equal(flight({ x: 0, y: 0 }, { x: 0, y: 0 }, .5).h, 20);
+  assert.deepEqual(beam({ x: 0, y: 0 }, { x: 30, y: 40 }), { len: 50, deg: 53, flip: false });
+  assert.equal(beam({ x: 0, y: 0 }, { x: -10, y: 0 }).flip, true);
+  assert.equal(beam({ x: 0, y: 0 }, { x: 0, y: -10 }).deg, -90);
+  assert.equal(beam({ x: 0, y: 0 }, { x: 0, y: -10 }).flip, false);
 });

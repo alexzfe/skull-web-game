@@ -13,7 +13,8 @@ import { chooseAction } from '../src/ai.js';
 import { viewFor, redactAction } from '../src/view.js';
 
 export const TIMERS = [0, 20, 30, 60];   // seconds; 0 = Off
-export const REACTIONS = ['smirk', 'think', 'skull', 'rose', 'laugh', 'tomato'];
+export const REACTIONS = ['smirk', 'think', 'skull', 'rose', 'laugh', 'tomato', 'bouquet', 'accuse', 'cheers'];
+export const TARGETED = ['tomato', 'bouquet', 'accuse', 'cheers'];   // aimed at another seat
 export const BOTS = [
   { name: 'Panthers', avatar: { emoji: '🐆' } },
   { name: 'Snakes', avatar: { emoji: '🐍' } },
@@ -664,7 +665,7 @@ export class RoomCore {
     if (!this.inGame(m) || !REACTIONS.includes(msg.kind)) return;
     if (m.lastReact != null && this.t - m.lastReact < REACT_MS) return;
     const ev = { t: 'event', e: 'react', from: m.seat, kind: msg.kind };
-    if (msg.kind === 'tomato') {
+    if (TARGETED.includes(msg.kind)) {
       const target = msg.target;
       if (!Number.isInteger(target) || target === m.seat || !g.seats[target]) return;
       ev.target = target;

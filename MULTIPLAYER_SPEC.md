@@ -208,6 +208,10 @@ remains → `game-over` with that winner. If the forfeiter was the next `firstPl
 
 - v1: 4–6 pop-up reactions over your seat (e.g. 😏 🤔 💀 🌹 😂) + a **🍅 tomato** thrown
   at a chosen player (it flies from seat to seat and splats).
+- Targeted emotes (aimed at another seat, `target` required): 🍅 tomato, 💐 bouquet (bursts
+  into petals), 👉 accuse (a beam from seat to seat, ‼️ over them), 🥂 cheers (clinks; if the
+  target raises one back within 4s, both seats glow and a big "Cheers!" lands between them —
+  worked out on each client from the event stream, no extra server state).
 - The server rate-limits to 1 per player per 2s and broadcasts `{t:'event', e:'react',
   from, kind, target?}`. Unknown `kind` values are dropped.
 - Client module `src/reactions.js` + `reactions.css`:

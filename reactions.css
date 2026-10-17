@@ -38,10 +38,10 @@
 }
 @keyframes rx-cool { from { --rx-p: 1; } to { --rx-p: 0; } }
 
-/* Tray: a compact pill opening leftward over the table. */
+/* Tray: a compact panel opening leftward over the table — pop-ups on top, aimed emotes below. */
 .rx-tray {
-  flex: none; display: flex; gap: 2px; padding: 4px;
-  border-radius: 999px;
+  flex: none; display: flex; flex-direction: column; gap: 2px; padding: 4px;
+  border-radius: 24px;
   background: rgba(23, 16, 13, .94);
   border: 1px solid rgba(255,45,111,.45);
   box-shadow: 0 6px 22px rgba(0,0,0,.6), 0 0 18px rgba(255,45,111,.25);
@@ -56,31 +56,34 @@
 }
 .rx-pick:hover { background: rgba(239,227,207,.08); transform: translateY(-2px); }
 .rx-pick:active { transform: scale(.9); }
-.rx-pick-tomato { margin-left: 4px; position: relative; }
-.rx-pick-tomato::before {
-  content: ''; position: absolute; left: -4px; top: 8px; bottom: 8px; width: 1px; background: var(--line, rgba(239,227,207,.12));
-}
+.rx-row { display: flex; gap: 2px; }
+.rx-row-aim { justify-content: center; padding-top: 2px; border-top: 1px solid var(--line, rgba(239,227,207,.12)); }
 
-/* ---------- aim mode (tomato) ---------- */
+/* ---------- aim mode (targeted emotes) ---------- */
+/* --rx-t is the target colour as r,g,b: red for tomatoes, pink flowers, amber accusations, gold cheers. */
+.rx-aim { --rx-t: 255,59,78; }
+.rx-aim[data-kind="bouquet"] { --rx-t: 255,110,170; }
+.rx-aim[data-kind="accuse"] { --rx-t: 255,170,40; }
+.rx-aim[data-kind="cheers"] { --rx-t: 255,214,90; }
 .rx-aim { position: fixed; inset: 0; z-index: 61; pointer-events: none; }
 .rx-targets { position: absolute; inset: 0; }
 .rx-target {
   position: absolute; padding: 0; pointer-events: auto; cursor: crosshair;
   border-radius: var(--radius, 14px);
-  border: 2px dashed var(--bad, #ff3b4e);
-  background: rgba(255, 59, 78, .12);
-  box-shadow: 0 0 18px rgba(255,59,78,.45), inset 0 0 18px rgba(255,59,78,.25);
+  border: 2px dashed rgb(var(--rx-t));
+  background: rgba(var(--rx-t), .12);
+  box-shadow: 0 0 18px rgba(var(--rx-t),.45), inset 0 0 18px rgba(var(--rx-t),.25);
   display: grid; place-items: center;
   animation: rx-target-pulse 1s ease-in-out infinite alternate;
 }
 .rx-target span { font-size: 26px; filter: drop-shadow(0 2px 4px rgba(0,0,0,.6)); }
-@keyframes rx-target-pulse { to { background: rgba(255,59,78,.22); box-shadow: 0 0 26px rgba(255,59,78,.7), inset 0 0 22px rgba(255,59,78,.35); } }
+@keyframes rx-target-pulse { to { background: rgba(var(--rx-t),.22); box-shadow: 0 0 26px rgba(var(--rx-t),.7), inset 0 0 22px rgba(var(--rx-t),.35); } }
 .rx-aim-bar {
   position: absolute; left: 50%; top: calc(58px + env(safe-area-inset-top)); translate: -50% 0;
   display: flex; align-items: center; gap: 10px; white-space: nowrap;
   padding: 6px 6px 6px 14px; border-radius: 999px; pointer-events: auto;
   background: rgba(23, 16, 13, .95); color: var(--ink, #efe3cf);
-  border: 1px solid rgba(255,59,78,.55);
+  border: 1px solid rgba(var(--rx-t),.55);
   box-shadow: 0 6px 20px rgba(0,0,0,.6);
   font-family: var(--font-ui, system-ui, sans-serif); font-size: 15px; letter-spacing: .04em;
 }
@@ -108,12 +111,12 @@
   100% { transform: translate(var(--rx-drift, 0px), -70px) scale(.9); opacity: 0; }
 }
 
-/* ---------- tomato flight + splat ---------- */
+/* ---------- flights (tomato, bouquet, cheers) + tomato splat ---------- */
 /* x moves linearly, y moves linearly, the bump goes up then down: together a parabola. */
 .rx-fly { position: absolute; width: 0; height: 0; animation: rx-fly-x var(--rx-fly, .65s) linear forwards; }
 .rx-fly-y { animation: rx-fly-y var(--rx-fly, .65s) linear forwards; }
 .rx-fly-bump { animation: rx-fly-bump var(--rx-fly, .65s) forwards; }
-.rx-fly-tomato {
+.rx-fly-thing {
   display: block; translate: -50% -50%; font-size: 34px; line-height: 1;
   filter: drop-shadow(0 4px 6px rgba(0,0,0,.6));
   animation: rx-spin var(--rx-fly, .65s) linear forwards;
@@ -167,6 +170,72 @@
   45% { transform: translateX(4px) rotate(1deg); } 70% { transform: translateX(-2px); } 100% { transform: none; }
 }
 
+/* ---------- glows, bursts, accuse beam, cheers toast ---------- */
+.rx-glow {
+  position: absolute; border-radius: var(--radius, 14px);
+  border: 2px solid rgb(var(--rx-g)); box-shadow: 0 0 22px rgba(var(--rx-g), .7), inset 0 0 18px rgba(var(--rx-g), .35);
+  animation: rx-glow 1.4s ease-out forwards;
+}
+.rx-glow-rose { --rx-g: 255,110,170; }
+.rx-glow-gold { --rx-g: 255,214,90; }
+.rx-glow-accuse { --rx-g: 255,170,40; animation-name: rx-glow-pulse; }
+@keyframes rx-glow { 0% { opacity: 0; transform: scale(1.12); } 15% { opacity: 1; transform: scale(1); } 65% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes rx-glow-pulse { 0% { opacity: 0; transform: scale(1.1); } 10%, 40%, 70% { opacity: 1; transform: none; } 25%, 55% { opacity: .35; } 100% { opacity: 0; } }
+
+.rx-burst { position: absolute; width: 0; height: 0; }
+.rx-burst span {
+  position: absolute; left: 0; top: 0; translate: -50% -50%; font-size: 18px; line-height: 1;
+  filter: drop-shadow(0 2px 3px rgba(0,0,0,.5));
+  animation: rx-bit 1.2s cubic-bezier(.15,.7,.3,1) forwards;
+}
+.rx-petals span { animation-name: rx-petal; }
+.rx-sparks-big span { font-size: 24px; }
+@keyframes rx-bit {
+  0% { transform: scale(.3); opacity: 0; } 12% { opacity: 1; }
+  100% { transform: translate(var(--bx), var(--by)) rotate(var(--br)) scale(.6); opacity: 0; }
+}
+/* Petals fly out, then drift down. */
+@keyframes rx-petal {
+  0% { transform: scale(.3); opacity: 0; } 12% { opacity: 1; }
+  45% { transform: translate(var(--bx), var(--by)) rotate(calc(var(--br) * .5)); }
+  100% { transform: translate(var(--bx), calc(var(--by) + 46px)) rotate(var(--br)) scale(.8); opacity: 0; }
+}
+
+.rx-accuse { position: absolute; width: 0; height: 0; animation: rx-fade-late 1.7s linear forwards; }
+.rx-beam {
+  position: absolute; left: 0; top: -2px; width: var(--len); height: 4px; border-radius: 2px;
+  transform-origin: 0 50%; transform: rotate(var(--deg));
+  background: repeating-linear-gradient(90deg, rgb(255,170,40) 0 10px, transparent 10px 16px);
+  filter: drop-shadow(0 0 6px rgba(255,170,40,.8));
+  animation: rx-beam .3s cubic-bezier(.3,.9,.4,1) both;
+}
+.rx-finger {
+  position: absolute; left: 0; top: 0; font-size: 34px; line-height: 1;
+  transform: translate(-50%, -50%) rotate(var(--deg));
+  filter: drop-shadow(0 3px 5px rgba(0,0,0,.6));
+  animation: rx-jab .5s ease-out .3s;
+}
+.rx-accuse.flip .rx-finger { transform: translate(-50%, -50%) rotate(var(--deg)) scaleY(-1); }
+@keyframes rx-beam { from { transform: rotate(var(--deg)) scaleX(0); } }
+@keyframes rx-jab { 35% { scale: 1.3; } }
+@keyframes rx-fade-late { 0%, 80% { opacity: 1; } 100% { opacity: 0; } }
+.rx-pop-accused { font-size: 34px; }
+
+.rx-toast {
+  position: absolute; translate: -50% -50%;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  animation: rx-toast 1.9s cubic-bezier(.2,.8,.3,1) forwards;
+}
+.rx-toast-glass { font-size: 56px; line-height: 1; filter: drop-shadow(0 4px 8px rgba(0,0,0,.6)) drop-shadow(0 0 14px rgba(255,214,90,.6)); }
+.rx-toast-word {
+  font-family: var(--font-ui, system-ui, sans-serif); font-size: 20px; font-weight: 700; letter-spacing: .08em;
+  color: #ffd65a; text-shadow: 0 2px 6px rgba(0,0,0,.8), 0 0 12px rgba(255,214,90,.6);
+}
+@keyframes rx-toast {
+  0% { transform: scale(.2) rotate(-12deg); opacity: 0; } 15% { transform: scale(1.2) rotate(6deg); opacity: 1; }
+  25% { transform: scale(1) rotate(0); } 75% { opacity: 1; } 100% { transform: translateY(-30px); opacity: 0; }
+}
+
 @media (max-width: 420px) {
   .rx { right: calc(6px + env(safe-area-inset-right)); }
   .rx-btn { width: 42px; height: 42px; }
@@ -179,5 +248,8 @@
   .rx-target, .rx-hit, .rx-tray { animation: none; }
   .rx-splat-goo, .rx-splat-face { animation: none; }
   .rx-splat-face { opacity: 0; }
+  .rx-glow, .rx-toast, .rx-accuse { animation: rx-fade 1.6s linear forwards; }
+  .rx-beam, .rx-finger { animation: none; }
+  .rx-burst { display: none; }
 }
 @keyframes rx-fade { 0% { opacity: 0; } 10%, 70% { opacity: 1; } 100% { opacity: 0; } }

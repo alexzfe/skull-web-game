@@ -609,6 +609,12 @@ describe('reactions', () => {
     assert.equal(h.msgs('t1', 'event').length, 1, 'bad tomato target dropped');
     h.send('t0', { t: 'react', kind: 'tomato', target: other });
     assert.equal(h.last('t2', 'event').target, other);
+    h.wait(2000);
+    h.send('t0', { t: 'react', kind: 'cheers' });
+    assert.equal(h.msgs('t1', 'event').length, 2, 'every targeted kind needs a target');
+    h.send('t0', { t: 'react', kind: 'cheers', target: other });
+    assert.deepEqual(
+      (({ kind, target }) => ({ kind, target }))(h.last('t2', 'event')), { kind: 'cheers', target: other });
     for (const k of REACTIONS) assert.equal(typeof k, 'string');
   });
   test('reaction events go only to seated players, not late joiners', () => {
