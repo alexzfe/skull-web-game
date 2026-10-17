@@ -31,7 +31,7 @@ The client is plain JavaScript with no build step: `index.html`, the CSS files a
 
 ## Deploys
 
-Every push to `main` triggers GitHub Actions (`.github/workflows/ci.yml`), which runs the tests and then `wrangler deploy` to Cloudflare. Pull requests run the tests only. After a deploy, open tabs notice the new version when they reconnect, reload themselves and rejoin their seat.
+Every push to `main` triggers GitHub Actions (`.github/workflows/ci.yml`), which runs the tests and then `wrangler deploy` to Cloudflare. Pull requests run the tests only. The deploy job needs two repository secrets, `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. [`scripts/setup-ci-secrets.sh`](scripts/setup-ci-secrets.sh) is an interactive wizard that walks you through creating and setting them. After a deploy, open tabs notice the new version when they reconnect, reload themselves and rejoin their seat.
 
 ## License
 
