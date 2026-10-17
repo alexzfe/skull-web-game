@@ -2,7 +2,6 @@ worker/
 test/
 qa/
 docs/
-scripts/
 .github/
 node_modules/
 .wrangler/
