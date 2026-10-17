@@ -4,7 +4,7 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "test": "node --test test/",
+    "test": "node --test \"test/*.test.js\"",
     "start": "npx --yes serve -l 5173 .",
     "dev": "node worker/dev.mjs",
     "deploy": "wrangler deploy"
