@@ -1,6 +1,9 @@
 worker/
 test/
 qa/
+docs/
+scripts/
+.github/
 node_modules/
 .wrangler/
 .git
@@ -8,5 +11,6 @@ node_modules/
 .assetsignore
 *.md
 *.pdf
+LICENSE
 wrangler.toml
 package*.json
