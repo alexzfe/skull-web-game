@@ -2,7 +2,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { ROSE, SKULL, createGame, applyAction, legalActions } from '../src/engine.js';
 import {
-  RoomCore, cleanAvatar, actors, autoAction, BOTS, REACTIONS, ERR, CLOSE,
+  RoomCore, cleanAvatar, actors, autoAction, versionSkew, BOTS, REACTIONS, ERR, CLOSE,
   ABANDON_MS, CLEANUP_MS, NEXT_ROUND_MS, GAME_OVER_MS, OFF_CLOCK_MS,
 } from '../worker/room-core.js';
 
@@ -755,3 +755,86 @@ describe('lobby.me (shell request)', () => {
     assert.equal(h.lobby('b').hostSeat, 0);
   });
 });
+
+describe('version skew after a deploy', () => {
+  // A harness whose room runs server build `version`.
+  function versioned(version) {
+    const h = harness();
+    h.room.version = version;
+    h.helloV = (tk, v, name = 'Mo') => {
+      h.open.add(tk);
+      return h.deliver(h.room.handle(tk, { t: 'hello', name, avatar: { emoji: '🐺' }, version: v }));
+    };
+    return h;
+  }
+
+  test('versionSkew: only a real mismatch between two known builds', () => {
+    assert.equal(versionSkew('v1', 'v2'), true);
+    assert.equal(versionSkew('v1', 'v1'), false);
+    assert.equal(versionSkew(undefined, 'v2'), false);   // old client that sends no version
+    assert.equal(versionSkew('', 'v2'), false);
+    assert.equal(versionSkew(null, 'v2'), false);
+    assert.equal(versionSkew(42, 'v2'), false);
+    assert.equal(versionSkew('dev', 'v2'), false);
+    assert.equal(versionSkew('v1', 'dev'), false);
+    assert.equal(versionSkew('v1', null), false);
+    assert.equal(versionSkew('dev', 'dev'), false);
+  });
+
+  test('an old client is told to reload and closed with CLOSE.reload, nothing else changes', () => {
+    const h = versioned('new');
+    h.helloV('a', 'new', 'Ann');
+    const before = structuredClone(h.room.s);
+    h.clear();
+    const out = h.helloV('b', 'old', 'Bo');
+    assert.deepEqual(h.msgs('b', 'reload').map(m => m.version), ['new']);
+    assert.equal(h.closed.b, CLOSE.reload);
+    assert.equal(out.length, 2, 'just the reload message and the close');
+    assert.deepEqual(h.room.s, before, 'room state untouched');
+    assert.equal(h.inbox.a, undefined, 'others hear nothing');
+  });
+
+  test('a seated player on an old build keeps the seat and rejoins after the reload', () => {
+    const h = versioned('v1');
+    h.helloV('a', 'v1', 'Ann');
+    h.helloV('b', 'v1', 'Bo');
+    h.drop('b');                              // the deploy dropped the socket
+    h.room.version = 'v2';                    // ...and the room woke up on the new build
+    h.helloV('b', 'v1', 'Bo');
+    assert.equal(h.closed.b, CLOSE.reload);
+    assert.equal(h.room.s.members.b.connected, false);
+    assert.equal(h.seatOf('b'), 1, 'seat kept');
+    h.helloV('b', 'v2', 'Bo');                // reloaded page, new build
+    assert.equal(h.room.s.members.b.connected, true);
+    assert.equal(h.seatOf('b'), 1);
+    assert.equal(h.lobby('b').me, 1);
+  });
+
+  test('matching, missing or dev versions join normally', () => {
+    for (const [server, client] of [['v1', 'v1'], ['v1', undefined], ['v1', 'dev'], ['dev', 'v9'], [null, 'v1']]) {
+      const h = versioned(server);
+      h.helloV('a', client);
+      assert.equal(h.msgs('a', 'reload').length, 0, `${client} → ${server}`);
+      assert.equal(h.closed.a, undefined);
+      assert.ok(h.lobby('a'), 'got the lobby');
+    }
+  });
+
+  test('a kicked token is still refused as kicked, not reloaded', () => {
+    const h = versioned('v2');
+    h.helloV('a', 'v2', 'Ann');
+    h.helloV('b', 'v2', 'Bo');
+    h.lobbyOp('a', 'kick', { seat: 1 });
+    h.helloV('b', 'v1', 'Bo');
+    assert.equal(h.closed.b, CLOSE.kicked);
+    assert.equal(h.msgs('b', 'reload').length, 0);
+  });
+
+  test('the version is not persisted with the room', () => {
+    const h = versioned('v1');
+    h.helloV('a', 'v1');
+    assert.equal(JSON.stringify(h.room.toJSON()).includes('"v1"'), false);
+    assert.equal(RoomCore.fromJSON(h.room.toJSON(), { version: 'v2' }).version, 'v2');
+  });
+});
+

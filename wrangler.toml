@@ -16,3 +16,8 @@ class_name = "LobbyDirectory"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Room", "LobbyDirectory"]
+
+# Exposes the deployed version id; the worker serves it at /api/version and the
+# rooms ask old clients (version skew after a deploy) to reload.
+[version_metadata]
+binding = "CF_VERSION_METADATA"

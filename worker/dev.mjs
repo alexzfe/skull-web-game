@@ -88,7 +88,9 @@ const watcher = watch(ROOT, { recursive: true }, (_event, file) => {
 });
 
 const bin = join(ROOT, 'node_modules', '.bin', 'wrangler');
-const child = spawn(bin, ['dev', '--assets', MIRROR, ...process.argv.slice(2)], { cwd: ROOT, stdio: 'inherit' });
+// wrangler dev fakes CF_VERSION_METADATA with a random id; pin the version to
+// 'dev' so local tabs are never told to reload (see /api/version).
+const child = spawn(bin, ['dev', '--assets', MIRROR, '--var', 'VERSION_OVERRIDE:dev', ...process.argv.slice(2)], { cwd: ROOT, stdio: 'inherit' });
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => child.kill(sig));
 child.on('exit', (code, signal) => {
   watcher.close();

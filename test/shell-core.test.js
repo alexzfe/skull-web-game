@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   AVATARS, parseSettings, parseHostOptions, stepAvatar, avatarTag, findMe, lobbySummary,
-  seatOrder, seatClocks, ringAt, lobbyRow, cleanName, OFF_CLOCK_MS,
+  seatOrder, seatClocks, ringAt, lobbyRow, cleanName, OFF_CLOCK_MS, shouldAutoReload, RELOAD_GAP_MS,
 } from '../src/shell-core.js';
 
 test('settings: defaults, clamping, avatar from the list only', () => {
@@ -70,3 +70,15 @@ test('open-lobby rows', () => {
     { code: 'KXQP', host: 'Mo', fill: '3/5', bots: 1, timer: 'Off', full: false });
   assert.equal(lobbyRow({ code: 'KXQP', host: '', humans: 6, bots: 0, seats: 6, timer: 30 }).full, true);
 });
+
+test('version-skew reload: at most one auto-reload per 30s', () => {
+  const now = 10_000_000;
+  assert.equal(RELOAD_GAP_MS, 30_000);
+  assert.equal(shouldAutoReload(null, now), true);            // never reloaded
+  assert.equal(shouldAutoReload('garbage', now), true);
+  assert.equal(shouldAutoReload(String(now - 5_000), now), false);
+  assert.equal(shouldAutoReload(String(now - 29_999), now), false);
+  assert.equal(shouldAutoReload(String(now - 30_000), now), true);
+  assert.equal(shouldAutoReload(String(now + 60_000), now), true);  // clock went backwards: don't get stuck
+});
+

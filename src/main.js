@@ -13,8 +13,8 @@ import { createCoach } from './coach.js';
 import { announce } from './announce.js';
 import { createHome } from './home.js';
 import { createLobbyUI } from './lobby-ui.js';
-import { createRemoteController, createRoom, listLobbies, getToken, shareLink, parseShareHash } from './net.js';
-import { parseSettings, parseHostOptions, avatarTag, findMe, seatClocks, NUDGE_MS } from './shell-core.js';
+import { createRemoteController, createRoom, listLobbies, getToken, shareLink, parseShareHash, fetchVersion } from './net.js';
+import { parseSettings, parseHostOptions, avatarTag, findMe, seatClocks, NUDGE_MS, shouldAutoReload } from './shell-core.js';
 import { soundOn, setSound, tick, unlock } from './sound.js';
 
 const HUMAN = 0;
@@ -386,6 +386,12 @@ function runBot(id) {
 
 const ROOM_KEY = 'skull.room';            // sessionStorage: the room this tab is in (refresh rejoins)
 const HOST_OPTIONS_KEY = 'skull.hostOptions';
+const RELOAD_KEY = 'skull.reloadAt';      // sessionStorage: last version-skew auto-reload (loop guard)
+
+// The server build this page was loaded with; sent in every hello so a server on
+// a newer build (after a deploy) can tell an old tab to reload. Fetched once.
+let clientVersion = null;
+fetchVersion().then(v => { clientVersion = v; });
 
 let mp = null;          // the open room session, see openRoom()
 
@@ -474,7 +480,7 @@ function openRoom(code, { from }) {
   leaveSolo();
   const s = loadSettings();
   const tag = avatarTag(getToken());
-  const rc = createRemoteController({ code, name: s.name, avatar: { ...s.avatar, k: tag } });
+  const rc = createRemoteController({ code, name: s.name, avatar: { ...s.avatar, k: tag }, version: () => clientVersion });
   const session = {
     rc, code, tag, from,
     lobby: null, me: null, joined: false, optionsSent: false,
@@ -561,7 +567,29 @@ function onStatus(st) {
       if (!d.open) d.showModal();
       return;
     }
+    case 'reload': reloadForNewVersion(); return;
   }
+}
+
+// A deploy happened while this tab was open: reload to get the new client. The
+// room stays in sessionStorage + the hash, so the reload rejoins the same seat.
+function reloadForNewVersion() {
+  let last = null;
+  try { last = sessionStorage.getItem(RELOAD_KEY); } catch { /* ignore */ }
+  const now = Date.now();
+  if (!shouldAutoReload(last, now)) {
+    failJoin('A new version is out. Refresh the page to rejoin.');
+    return;
+  }
+  try { sessionStorage.setItem(RELOAD_KEY, String(now)); } catch { /* ignore */ }
+  const text = 'New version — reloading…';
+  if (mp.screen === 'game') ui.toast(text);
+  else if (mp.screen === 'lobby') lobbyUI.flash(text);
+  else if (mp.from === 'link') home.linkMessage(text, 'info');
+  else if (mp.from === 'home') home.message(text, 'info');
+  else home.notice(text, 'info');
+  setRoomHash(mp.code);
+  setTimeout(() => location.reload(), 1200);
 }
 
 function onServerError(msg) {

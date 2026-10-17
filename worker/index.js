@@ -19,6 +19,11 @@ function randomCode() {
   return [...bytes].map(b => CODE_LETTERS[b % CODE_LETTERS.length]).join('');
 }
 
+// The deployed build: CF version metadata on Cloudflare. Locally it is 'dev':
+// worker/dev.mjs sets VERSION_OVERRIDE (wrangler dev would fake a random id),
+// and without the binding at all it falls back to 'dev'.
+const serverVersion = env => env?.VERSION_OVERRIDE || env?.CF_VERSION_METADATA?.id || 'dev';
+
 const roomStub = (env, code) => env.ROOM.get(env.ROOM.idFromName(code));
 const lobbyStub = env => env.LOBBIES.get(env.LOBBIES.idFromName('directory'));
 
@@ -35,6 +40,10 @@ export default {
         if (res.ok) return json({ code });
       }
       return json({ error: 'No free room code' }, 503);
+    }
+
+    if (path === '/api/version' && request.method === 'GET') {
+      return json({ version: serverVersion(env) });
     }
 
     if (path === '/api/lobbies' && request.method === 'GET') {
@@ -66,7 +75,7 @@ export class Room extends DurableObject {
       const [snap, listed] = await Promise.all([ctx.storage.get('room'), ctx.storage.get('listed')]);
       if (listed) this.listed = listed;
       if (!snap) return;
-      this.core = RoomCore.fromJSON(snap);
+      this.core = RoomCore.fromJSON(snap, { version: serverVersion(env) });
       // Sockets dropped while we were away (e.g. a deploy) never sent a close.
       const live = new Set(ctx.getWebSockets().map(ws => ws.deserializeAttachment()?.token));
       for (const [token, m] of Object.entries(snap.members)) {
@@ -82,7 +91,7 @@ export class Room extends DurableObject {
       const code = await request.text();
       await this.ctx.storage.deleteAll();
       this.listed = 'null';
-      this.core = new RoomCore({ code });
+      this.core = new RoomCore({ code, version: serverVersion(this.env) });
       await this.flush([]);
       return new Response('ok');
     }

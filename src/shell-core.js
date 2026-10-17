@@ -118,3 +118,14 @@ export function lobbyRow(l) {
     full: humans + bots >= 6,
   };
 }
+
+// ---------- version-skew reload ----------
+
+export const RELOAD_GAP_MS = 30_000;     // at most one automatic reload per 30s (no loops)
+
+// The server said this page runs an old build. Reload unless we already did so
+// recently (`lastAt`: epoch ms of the last auto-reload, from sessionStorage).
+export function shouldAutoReload(lastAt, now, gap = RELOAD_GAP_MS) {
+  const last = Number(lastAt);
+  return !(Number.isFinite(last) && last > 0 && now - last >= 0 && now - last < gap);
+}

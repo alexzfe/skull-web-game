@@ -6,14 +6,18 @@
 //   normalizeCode(str)             → 'KX4P' | null      cleanCode(str) → partial input, ≤4 valid letters
 //   shareLink(code, opts?)         → `${origin}/#/r/KX4P`   parseShareHash(hash) → code | null
 //   createRoom(opts?)              → Promise<{code}>     listLobbies(opts?) → Promise<[{code, host, humans, seats, bots, timer}]>
+//   fetchVersion(opts?)            → Promise<string|null>  the server build (GET /api/version), null on failure
 //
-//   const rc = createRemoteController({ code, name, avatar, token?, base? })
+//   const rc = createRemoteController({ code, name, avatar, token?, base?, version? })
+//                    version: string or () => string|null, sent in the hello; a server on a
+//                    different build answers {t:'reload'} (status 'reload')
 //   rc.onView(cb)    cb(view, {seq, seats, deadline}) — only views newer than the last applied
 //   rc.onLobby(cb)   cb(lobby)
 //   rc.onEvent(cb)   cb({e, from, kind, target?})       (reactions etc.)
 //   rc.onError(cb)   cb(msg)                            (server {t:'error'} messages)
-//   rc.onStatus(cb)  cb(status): 'connecting' | 'open' | 'reconnecting' | 'closed' | 'kicked' | 'not-found' | 'full' | 'replaced'
-//                    ('replaced' = another tab took this seat with the same token)
+//   rc.onStatus(cb)  cb(status): 'connecting' | 'open' | 'reconnecting' | 'closed' | 'kicked' | 'not-found' | 'full' | 'replaced' | 'reload'
+//                    ('replaced' = another tab took this seat with the same token;
+//                     'reload' = this page runs an older build than the server — reload it)
 //   rc.send(action)  engine action → true if it went out (the server fills in `player`)
 //   rc.lobby(op, args?)   host lobby ops: 'options' {seats, timer, open} · 'addBot' · 'removeBot' {seat} · 'kick' {seat} · 'start' · 'rematch'
 //   rc.react(kind, target?)
@@ -24,7 +28,7 @@
 // Every on*() returns an unsubscribe function. onView/onLobby/onStatus call a new
 // subscriber at once with the latest value they have, so a screen mounted late
 // still gets the current table. The controller reconnects on its own after any
-// close it didn't ask for; 'kicked', 'not-found', 'full', 'replaced' and 'closed' are final.
+// close it didn't ask for; 'kicked', 'not-found', 'full', 'replaced', 'reload' and 'closed' are final.
 //
 // Everything platform-ish (WebSocket, fetch, storage, timers, clock, location,
 // document/window) can be injected through an options object, so this module
@@ -121,9 +125,21 @@ export async function listLobbies(opts = {}) {
   return Array.isArray(body) ? body : [];
 }
 
+export async function fetchVersion(opts = {}) {
+  const e = env(opts);
+  try {
+    const res = await e.fetch(`${httpBase(opts.base, e)}/api/version`, { cache: 'no-store' });
+    if (!res.ok) return null;
+    const body = await res.json();
+    return typeof body?.version === 'string' && body.version ? body.version : null;
+  } catch {
+    return null;
+  }
+}
+
 // ---------- remote controller ----------
 
-const FINAL = new Set(['closed', 'kicked', 'not-found', 'full', 'replaced']);
+const FINAL = new Set(['closed', 'kicked', 'not-found', 'full', 'replaced', 'reload']);
 
 // Server {t:'error'} messages that end the session. Close codes are accepted too
 // in case the server prefers them (see NOTES.md, Net agent).
@@ -134,18 +150,19 @@ function finalStatusForError(msg) {
   return null;
 }
 // Server close codes (NOTES.md, Server agent): 4000 replaced by another tab, 4001 kicked /
-// table full / after leave, 4002 room closed. 4004/4009 are harmless extras.
+// table full / after leave, 4002 room closed, 4005 reload (version skew). 4004/4009 are harmless extras.
 // 'Table full' and leave() reach a final status first, so a later 4001 can't relabel them.
 function statusForClose(code, opened) {
   if (code === 4000) return 'replaced';
   if (code === 4001) return 'kicked';
   if (code === 4002) return opened ? 'closed' : 'not-found';
   if (code === 4004) return 'not-found';
+  if (code === 4005) return 'reload';
   if (code === 4009) return 'full';
   return null;
 }
 
-export function createRemoteController({ code, name, avatar, token, base, ...opts } = {}) {
+export function createRemoteController({ code, name, avatar, token, base, version, ...opts } = {}) {
   const e = env(opts);
   const roomCode = normalizeCode(code);
   const myToken = token ?? getToken({ storage: e.storage });
@@ -194,7 +211,8 @@ export function createRemoteController({ code, name, avatar, token, base, ...opt
       opened = true;
       refused = 0;
       setStatus('open');
-      sock.send(JSON.stringify({ t: 'hello', name, avatar }));
+      const v = typeof version === 'function' ? version() : version;
+      sock.send(JSON.stringify(v ? { t: 'hello', name, avatar, version: v } : { t: 'hello', name, avatar }));
     };
     sock.onmessage = ev => {
       if (ws !== sock) return;
@@ -275,6 +293,9 @@ export function createRemoteController({ code, name, avatar, token, base, ...opt
       }
       case 'kicked':
         finish('kicked');
+        return;
+      case 'reload':
+        finish('reload');
         return;
     }
   }

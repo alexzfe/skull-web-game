@@ -1,7 +1,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  getToken, normalizeCode, cleanCode, shareLink, parseShareHash, createRoom, listLobbies, createRemoteController,
+  getToken, normalizeCode, cleanCode, shareLink, parseShareHash, createRoom, listLobbies, createRemoteController, fetchVersion,
 } from '../src/net.js';
 
 // ---------- fakes ----------
@@ -357,7 +357,7 @@ describe('remote controller', () => {
   });
 
   test('server close codes are final', () => {
-    const cases = [[4000, 'replaced'], [4001, 'kicked'], [4002, 'closed'], [4004, 'not-found'], [4009, 'full']];
+    const cases = [[4000, 'replaced'], [4001, 'kicked'], [4002, 'closed'], [4004, 'not-found'], [4005, 'reload'], [4009, 'full']];
     for (const [code, status] of cases) {
       const { rc, socks, timers } = setup();
       socks.last().open();
@@ -435,3 +435,41 @@ describe('remote controller', () => {
     assert.equal(listeners.online, undefined, 'listeners removed when closed for good');
   });
 });
+
+describe('version skew', () => {
+  test('the hello carries the version (string or getter, read at each connect)', () => {
+    let v = null;
+    const { socks, timers } = setup({ version: () => v });
+    socks.last().open();
+    assert.deepEqual(socks.last().sent[0], { t: 'hello', name: 'Mo', avatar: { emoji: '🐺' } });
+    v = 'abc';
+    socks.last().drop(1006);
+    timers.advance(10_000);
+    socks.last().open();
+    assert.deepEqual(socks.last().sent[0], { t: 'hello', name: 'Mo', avatar: { emoji: '🐺' }, version: 'abc' });
+    const fixed = setup({ version: 'xyz' });
+    fixed.socks.last().open();
+    assert.equal(fixed.socks.last().sent[0].version, 'xyz');
+  });
+
+  test('a reload message is final', () => {
+    const { rc, socks, timers } = setup({ version: 'old' });
+    socks.last().open();
+    socks.last().msg({ t: 'reload', version: 'new' });
+    socks.last().drop(4005);
+    timers.advance(60_000);
+    assert.equal(rc.status(), 'reload');
+    assert.equal(socks.all.length, 1);
+  });
+
+  test('fetchVersion GETs /api/version, null on any failure', async () => {
+    const calls = [];
+    const ok = await fetchVersion({ base: 'https://skull.test', fetch: async url => { calls.push(url); return { ok: true, json: async () => ({ version: 'v7' }) }; } });
+    assert.equal(ok, 'v7');
+    assert.deepEqual(calls, ['https://skull.test/api/version']);
+    assert.equal(await fetchVersion({ base: 'x', fetch: async () => ({ ok: false }) }), null);
+    assert.equal(await fetchVersion({ base: 'x', fetch: async () => { throw new Error('offline'); } }), null);
+    assert.equal(await fetchVersion({ base: 'x', fetch: async () => ({ ok: true, json: async () => ({}) }) }), null);
+  });
+});
+

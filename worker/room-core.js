@@ -42,7 +42,7 @@ export const DEFAULT_AVATAR = { emoji: '💀' };
 const NAME_MAX = 16;
 
 // WebSocket close codes the client understands (src/net.js).
-export const CLOSE = { left: 1000, replaced: 4000, kicked: 4001, notFound: 4004, full: 4009 };
+export const CLOSE = { left: 1000, replaced: 4000, kicked: 4001, notFound: 4004, reload: 4005, full: 4009 };
 
 export const ERR = {
   hello: 'Say hello first',
@@ -60,6 +60,14 @@ export const ERR = {
 
 const ACTION_KEYS = ['type', 'player', 'card', 'amount', 'target', 'cardIndex'];
 const actionKey = a => JSON.stringify(ACTION_KEYS.map(k => a[k] ?? null));
+
+// Version skew after a deploy: a tab still running the old client says hello
+// to the new server. Only a real mismatch counts — both sides known, neither a
+// local 'dev' build — so a missing or 'dev' version never forces a reload.
+export function versionSkew(clientVersion, serverVersion) {
+  const known = v => typeof v === 'string' && v !== '' && v !== 'dev';
+  return known(clientVersion) && known(serverVersion) && clientVersion !== serverVersion;
+}
 
 export function cleanName(name) {
   // eslint-disable-next-line no-control-regex
@@ -93,8 +101,10 @@ export function cleanAvatar(avatar) {
 }
 
 export class RoomCore {
-  constructor({ code = '', now = Date.now, rng = Math.random, snapshot = null } = {}) {
+  // `version`: the deployed server build (CF version id, or 'dev'). Not persisted.
+  constructor({ code = '', now = Date.now, rng = Math.random, snapshot = null, version = null } = {}) {
     this.now = now;
+    this.version = version;
     this.rng = rng;
     this.t = now();
     this.out = [];
@@ -296,6 +306,12 @@ export class RoomCore {
     if (s.kicked.includes(token)) {
       this.send(token, { t: 'kicked' });
       return this.close(token, CLOSE.kicked);
+    }
+    // Old client after a deploy: tell it to reload (it rejoins its seat on load).
+    // Nothing about the member changes here.
+    if (versionSkew(msg.version, this.version)) {
+      this.send(token, { t: 'reload', version: this.version });
+      return this.close(token, CLOSE.reload);
     }
     let m = s.members[token];
     if (m) {
