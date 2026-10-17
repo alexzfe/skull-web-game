@@ -15,7 +15,7 @@ import { createHome } from './home.js';
 import { createLobbyUI } from './lobby-ui.js';
 import { createRemoteController, createRoom, listLobbies, getToken, shareLink, parseShareHash, fetchVersion } from './net.js';
 import { parseSettings, parseHostOptions, avatarTag, findMe, seatClocks, NUDGE_MS, shouldAutoReload } from './shell-core.js';
-import { soundOn, setSound, tick, unlock } from './sound.js';
+import { soundOn, setSound, tick, unlock, cuesFor, playCues } from './sound.js';
 
 const HUMAN = 0;
 const BOT_NAMES = ['Panthers', 'Snakes', 'Werewolves', 'Eagles', 'Himself', 'Vipers', 'Ravens', 'Jackals', 'Hellhounds', 'Coyotes', 'Iron Mules', 'Night Owls'];
@@ -122,7 +122,7 @@ function toSetup() {
   state = null;
   controller = null;
   closeRoom();
-  ui.setMode({ mp: false });
+  ui.setMode({ mp: false, sound: soundOn() });
   ui.showSetup(loadSettings());
   home.paintIdentity();
 }
@@ -216,7 +216,7 @@ function startGame(d = null) {
   home.hidden();
   controller = local;
   local.onView((view, opts) => ui.render(view, opts));
-  ui.setMode({ mp: false });
+  ui.setMode({ mp: false, sound: soundOn() });
   director = d;
   ctl = makeCtl();
   gameOverShown = false;
@@ -289,7 +289,9 @@ function perform(action) {
   state = next;
   autoNextAt = null;
   if (next.phase === 'place-initial') ghost = null;
-  announce(ui, viewFor(prev, HUMAN), viewFor(next, HUMAN), action);
+  const before = viewFor(prev, HUMAN), after = viewFor(next, HUMAN);
+  announce(ui, before, after, action);
+  playCues(cuesFor(before, after, action));
 
   if (prev.phase === 'reveal' && next.phase !== 'reveal') {
     // Hold the final flip on screen before the engine's post-reveal board
@@ -730,6 +732,7 @@ function onView(view, meta) {
   if (gameOver) scheduleWinner(view, meta);
   if (fresh) {
     announce(gameOver ? noWinBanner(quietUI(a)) : quietUI(a), prev, view, a);
+    playCues(cuesFor(prev, view, a));
     if (a.type === 'reveal' && prev.phase === 'reveal' && view.phase !== 'reveal') {
       holdFinalFlip(prev, view, a);
       scheduleNudge();
@@ -838,8 +841,8 @@ document.addEventListener('click', e => {
   }
 });
 
-// Audio may only start after a gesture; any tap at a multiplayer table unlocks it.
-document.addEventListener('pointerdown', () => { if (mp && soundOn()) unlock(); }, { passive: true });
+// Audio may only start after a gesture; any tap unlocks it.
+document.addEventListener('pointerdown', () => { if (soundOn()) unlock(); }, { passive: true });
 
 // ---------- boot ----------
 

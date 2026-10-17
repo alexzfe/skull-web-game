@@ -185,12 +185,11 @@ export function createUI(handlers) {
     showScreen('game');
   }
 
-  // Multiplayer tables swap the top bar's restart button for Leave + 🔊.
+  // Multiplayer tables swap the top bar's restart button for Leave.
   function setMode({ mp = false, sound = true } = {}) {
     el.game.classList.toggle('mp', mp);
     el.newGameBtn.hidden = mp;
     el.leaveBtn.hidden = !mp;
-    el.soundBtn.hidden = !mp;
     setSoundIcon(sound);
   }
 
